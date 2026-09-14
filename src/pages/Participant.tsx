@@ -111,9 +111,9 @@ function Registration({ config, onStarted }: { config: ConfigResponse; onStarted
   return (
     <div className="welcome-grid">
       <section className="welcome-copy">
-        <span className="eyebrow"><Icon name="spark" size={16}/> Inventaire professionnel</span>
-        <h1>Mieux comprendre votre manière de communiquer</h1>
-        <p className="lead">Un parcours confidentiel pour repérer vos préférences, vos ressources et la dynamique qui vous mobilise aujourd’hui.</p>
+        <span className="eyebrow"><Icon name="spark" size={16}/> Inventaire de personnalité PCM</span>
+        <h1>Découvrir votre Structure de Personnalité</h1>
+        <p className="lead">Un inventaire confidentiel centré sur les six Types de Personnalité, la Base, la Phase actuelle, les Perceptions, les Canaux de Communication et les Besoins Psychologiques.</p>
         <div className="facts-row">
           <span><Icon name="clock"/> {config.session.estimatedMinutes} minutes</span>
           <span><Icon name="file"/> {config.session.itemCount} affirmations</span>
@@ -233,7 +233,7 @@ function Questionnaire({ initial, onComplete, onCancel }: { initial: SavedDraft;
       <div className="progress-line"><span style={{ width: `${progress}%` }}/></div>
       <section className="question-stage">
         <div className="question-meta">
-          <span>{question.kind === "dynamique" ? "VOTRE PÉRIODE ACTUELLE" : "VOS HABITUDES"}</span>
+          <span>{question.kind === "dynamique" ? "PHASE ACTUELLE · BESOINS PSYCHOLOGIQUES" : "STRUCTURE DE PERSONNALITÉ"}</span>
           <strong>{index + 1} <em>/ {total}</em></strong>
         </div>
         <article className="question-card" key={question.id}>
@@ -276,7 +276,7 @@ function Completion({ receipt }: { receipt: string }) {
       <span className="completion-icon"><Icon name="check" size={34}/></span>
       <span className="eyebrow">PASSATION TERMINÉE</span>
       <h1>Merci, vos réponses sont enregistrées.</h1>
-      <p>Le formateur va maintenant analyser vos repères et préparer un échange personnalisé. Les résultats ne sont pas affichés automatiquement afin de préserver la qualité de la restitution.</p>
+      <p>Le formateur va maintenant analyser votre Structure de Personnalité, la Base proposée et la Phase actuelle proposée afin de préparer la restitution. Les résultats ne sont pas affichés automatiquement afin de préserver la qualité de la restitution.</p>
       <div className="receipt"><small>Référence confidentielle</small><strong>{receipt}</strong></div>
       <p className="completion-note">Vous pouvez fermer cette page en toute sécurité.</p>
     </div>

@@ -404,7 +404,7 @@ async function assessmentDetail(request: Request, assessmentId: string) {
              COALESCE(i.observations, '') AS observations,
              COALESCE(i.action_plan, '') AS action_plan,
              COALESCE(i.trainer_name, '') AS trainer_name,
-             i.restitution_date
+             i.restitution_date, i.base_code, i.phase_code
       FROM assessments a
       JOIN participants p ON p.id = a.participant_id
       JOIN seminar_sessions s ON s.id = a.seminar_session_id
@@ -432,6 +432,8 @@ async function assessmentDetail(request: Request, assessmentId: string) {
         actionPlan: String(row.action_plan),
         trainerName: String(row.trainer_name),
         restitutionDate: row.restitution_date ? String(row.restitution_date) : null,
+        baseCode: row.base_code ? String(row.base_code) as DimensionCode : null,
+        phaseCode: row.phase_code ? String(row.phase_code) as DimensionCode : null,
       },
     },
   });
@@ -446,11 +448,15 @@ async function updateInterpretation(request: Request, assessmentId: string) {
   const actionPlan = clean(body.actionPlan, 5000);
   const trainerName = clean(body.trainerName, 160);
   const restitutionDate = clean(body.restitutionDate, 10) || null;
+  const baseCode = clean(body.baseCode, 3) || null;
+  const phaseCode = clean(body.phaseCode, 3) || null;
+  if (baseCode && !['ANA','CON','REL','REF','CRE','ACT'].includes(baseCode)) throw new HttpError(400, 'Base invalide.');
+  if (phaseCode && !['ANA','CON','REL','REF','CRE','ACT'].includes(phaseCode)) throw new HttpError(400, 'Phase invalide.');
   await db.sql`
     INSERT INTO interpretations (
-      assessment_id, synthesis, observations, action_plan, trainer_name, restitution_date, updated_at
+      assessment_id, synthesis, observations, action_plan, trainer_name, restitution_date, base_code, phase_code, updated_at
     ) VALUES (
-      ${assessmentId}, ${synthesis}, ${observations}, ${actionPlan}, ${trainerName}, ${restitutionDate}, NOW()
+      ${assessmentId}, ${synthesis}, ${observations}, ${actionPlan}, ${trainerName}, ${restitutionDate}, ${baseCode}, ${phaseCode}, NOW()
     )
     ON CONFLICT (assessment_id) DO UPDATE SET
       synthesis = EXCLUDED.synthesis,
@@ -458,6 +464,8 @@ async function updateInterpretation(request: Request, assessmentId: string) {
       action_plan = EXCLUDED.action_plan,
       trainer_name = EXCLUDED.trainer_name,
       restitution_date = EXCLUDED.restitution_date,
+      base_code = EXCLUDED.base_code,
+      phase_code = EXCLUDED.phase_code,
       updated_at = NOW()
   `;
   await db.sql`

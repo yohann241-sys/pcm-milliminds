@@ -9,6 +9,7 @@ beforeAll(async () => {
   const files = [
     "netlify/database/migrations/202609140001_create_schema.sql",
     "netlify/database/migrations/202609140002_seed_questionnaire.sql",
+    "netlify/database/migrations/202609140003_pcm_v12.sql",
   ];
   for (const file of files) {
     const sql = readFileSync(resolve(process.cwd(), file), "utf8")
@@ -32,10 +33,13 @@ describe("migrations Netlify Database", () => {
     expect(sessions.rows[0].active).toBe(true);
   });
 
-  it("insèrent les six dimensions et les 72 questions", async () => {
+  it("conservent six dimensions et activent la version PCM 1.2", async () => {
     const dimensions = await database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM dimensions");
-    const questions = await database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM questionnaire_items");
+    const questions = await database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM questionnaire_items q JOIN assessment_versions v ON v.id=q.assessment_version_id WHERE v.version=\'1.2\'");
+    const active = await database.query<{ version: string }>("SELECT version FROM assessment_versions WHERE active=TRUE");
     expect(dimensions.rows[0].count).toBe(6);
     expect(questions.rows[0].count).toBe(72);
+    expect(active.rows).toHaveLength(1);
+    expect(active.rows[0].version).toBe("1.2");
   });
 });

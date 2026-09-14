@@ -136,5 +136,5 @@ export function calculateScores(
 export function buildTrainerSynthesis(result: ScoreResult) {
   const structure = result.leadingStructure.map((code) => DIMENSION_BY_CODE[code].shortName).join(" et ");
   const dynamics = result.leadingDynamics.map((code) => DIMENSION_BY_CODE[code].shortName).join(" et ");
-  return `Les réponses font ressortir en premier les repères ${structure}. La dynamique déclarée au moment de la passation se concentre sur ${dynamics}. Ces indications doivent être mises en regard des exemples concrets apportés par le participant et validées au cours de l’entretien de restitution.`;
+  return `La Structure de Personnalité issue de cet inventaire fait ressortir ${structure} comme Base proposée. Les réponses relatives aux Besoins Psychologiques actuels font ressortir ${dynamics} comme Phase actuelle proposée. Le formateur valide la Base, la Phase et leur interprétation au cours de la restitution.`;
 }

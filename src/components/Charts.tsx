@@ -52,7 +52,7 @@ export function RadarChart({
     .join(" ");
 
   return (
-    <div className="radar" role="img" aria-label="Graphique radar des six repères de communication">
+    <div className="radar" role="img" aria-label="Graphique radar des six Types de Personnalité">
       <svg viewBox={`0 0 ${size} ${size}`}>
         {grid.map((points, index) => <polygon key={index} points={points} className="radar__grid" />)}
         {dimensions.map((dimension, index) => {

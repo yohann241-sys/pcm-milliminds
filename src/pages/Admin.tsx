@@ -131,10 +131,10 @@ function AdminLogin() {
         <Brand />
         <div>
           <span className="eyebrow eyebrow--light">ESPACE PROFESSIONNEL</span>
-          <h1>Analyse et restitution des inventaires</h1>
+          <h1>Analyse et restitution PCM</h1>
           <p>Un environnement confidentiel réservé aux formateurs habilités par Milliminds.</p>
         </div>
-        <blockquote>« Observer les préférences pour mieux ajuster la relation. »</blockquote>
+        <blockquote>« Pour la Base : Perception + Canal. Pour la Phase : Besoins Psychologiques. »</blockquote>
       </section>
       <section className="login-form-panel">
         <a href="/" className="back-home"><Icon name="back" size={17}/> Retour à la passation</a>
@@ -176,7 +176,7 @@ function AdminLogin() {
             </>
           )}
           <small className="security-copy"><Icon name="shield" size={15}/> Authentification sécurisée par Netlify Identity</small>
-          <small className="build-version">Version 1.1.3</small>
+          <small className="build-version">Version 1.2.0</small>
         </form>
       </section>
     </main>
@@ -307,7 +307,7 @@ function ResultsList({ assessments, search, setSearch, status, setStatus }: { as
 function AssessmentTable({ assessments, compact = false }: { assessments: AssessmentListItem[]; compact?: boolean }) {
   if (!assessments.length) return <div className="empty-state"><Icon name="users" size={34}/><h3>Aucune passation</h3><p>Les participants apparaîtront ici dès leur inscription.</p></div>;
   return (
-    <div className="table-wrap"><table className="data-table"><thead><tr><th>Participant</th><th>Session</th><th>Dominante</th><th>Qualité</th><th>Statut</th><th></th></tr></thead><tbody>
+    <div className="table-wrap"><table className="data-table"><thead><tr><th>Participant</th><th>Session</th><th>Base proposée</th><th>Qualité</th><th>Statut</th><th></th></tr></thead><tbody>
       {assessments.map((item) => <tr key={item.id}><td><button className="participant-cell" onClick={() => navigate(`/admin/result/${item.id}`)}><span>{item.firstName.slice(0, 1)}{item.lastName.slice(0, 1)}</span><div><strong>{item.firstName} {item.lastName}</strong><small>{item.organization || formatDate(item.submittedAt, true)}</small></div></button></td><td><span className="session-name">{item.sessionName}</span></td><td><div className="dominant-tags">{item.leadingStructure.length ? item.leadingStructure.map((code) => <i key={code}>{code}</i>) : <small>En cours</small>}</div></td><td><QualityBadge value={item.qualityScore}/></td><td><StatusBadge status={item.status}/></td><td><button className="row-arrow" aria-label="Voir le résultat" onClick={() => navigate(`/admin/result/${item.id}`)}><Icon name="arrow"/></button></td></tr>)}
     </tbody></table>{compact && assessments.length > 5 ? <small>Affichage limité aux éléments récents.</small> : null}</div>
   );
@@ -354,10 +354,10 @@ function Sessions({ sessions, onChanged }: { sessions: DashboardData["sessions"]
 function Methodology({ dimensions }: { dimensions: DimensionDefinition[] }) {
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">RÉFÉRENTIEL</span><h1>Cadre d’interprétation</h1><p>Repères communs pour une restitution rigoureuse et nuancée.</p></div></div>
-      <Notice type="info"><strong>Positionnement.</strong> Cet inventaire pédagogique original éclaire des préférences déclarées. Il ne produit pas de Base, de Phase ou de Profil PCM officiel et ne remplace pas un questionnaire licencié.</Notice>
-      <section className="method-intro-grid"><article className="panel"><span className="panel-icon"><Icon name="chart"/></span><h2>Structure déclarée</h2><p>54 affirmations portent sur les habitudes de communication. Les scores donnent une intensité relative, jamais une étiquette exclusive.</p></article><article className="panel"><span className="panel-icon"><Icon name="spark"/></span><h2>Dynamique actuelle</h2><p>18 affirmations explorent les sources de mobilisation du moment. Cette lecture est temporelle et doit être validée en entretien.</p></article><article className="panel"><span className="panel-icon"><Icon name="shield"/></span><h2>Qualité de passation</h2><p>Cohérence interne, variété des réponses, taux de neutralité, complétude et durée servent d’indicateurs de vigilance.</p></article></section>
-      <section className="dimension-grid">{dimensions.map((dimension) => <article className="dimension-card" key={dimension.code} style={{ "--dimension": dimension.color } as React.CSSProperties}><div className="dimension-card__head"><span>{dimension.code}</span><div><h2>{dimension.shortName}</h2><p>{dimension.name}</p></div></div><p>{dimension.description}</p><dl><div><dt>Lecture privilégiée</dt><dd>{dimension.perception}</dd></div><div><dt>Canal conseillé</dt><dd>{dimension.channel}</dd></div><div><dt>Ressources</dt><dd>{dimension.strengths.join(" · ")}</dd></div><div><dt>Points de vigilance</dt><dd>{dimension.watchouts.join(" · ")}</dd></div></dl></article>)}</section>
+      <div className="page-heading"><div><span className="eyebrow">RÉFÉRENTIEL</span><h1>Cadre d’interprétation</h1><p>Référentiel PCM pour une restitution structurée par la Base, la Phase, les Perceptions et les Canaux de Communication.</p></div></div>
+      <Notice type="info"><strong>Usage formateur.</strong> Cette version reprend le vocabulaire PCM et propose une Base et une Phase à partir de l’inventaire Milliminds. La validation finale appartient au formateur certifié. Le questionnaire propriétaire PCM Profile et sa clé de cotation ne sont pas reproduits dans l’application.</Notice>
+      <section className="method-intro-grid"><article className="panel"><span className="panel-icon"><Icon name="chart"/></span><h2>Structure de Personnalité</h2><p>54 affirmations explorent l’ordre relatif des six Types de Personnalité et proposent une Base à confirmer lors de la restitution.</p></article><article className="panel"><span className="panel-icon"><Icon name="spark"/></span><h2>Phase actuelle</h2><p>18 affirmations explorent les Besoins Psychologiques du moment et proposent une Phase actuelle à valider avec le participant.</p></article><article className="panel"><span className="panel-icon"><Icon name="shield"/></span><h2>Qualité de passation</h2><p>Cohérence interne, variété des réponses, taux de neutralité, complétude et durée servent d’indicateurs de vigilance.</p></article></section>
+      <section className="dimension-grid">{dimensions.map((dimension) => <article className="dimension-card" key={dimension.code} style={{ "--dimension": dimension.color } as React.CSSProperties}><div className="dimension-card__head"><span>{dimension.code}</span><div><h2>{dimension.shortName}</h2><p>{dimension.name}</p></div></div><p>{dimension.description}</p><dl><div><dt>Perception</dt><dd>{dimension.perception}</dd></div><div><dt>Canal de Communication</dt><dd>{dimension.channel}</dd></div><div><dt>Points Forts</dt><dd>{dimension.strengths.join(" · ")}</dd></div><div><dt>Besoins Psychologiques</dt><dd>{dimension.motivators.join(" · ")}</dd></div><div><dt>Connexion</dt><dd>{dimension.connectionTips.join(" · ")}</dd></div><div><dt>Points de vigilance</dt><dd>{dimension.watchouts.join(" · ")}</dd></div></dl></article>)}</section>
     </>
   );
 }

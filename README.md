@@ -1,10 +1,6 @@
-## Version 1.1.1
+# Milliminds — Inventaire de personnalité PCM
 
-Cette version corrige l’affichage du logo Milliminds et le parcours Mot de passe oublié / réinitialisation Netlify Identity.
-
-# Milliminds — Formation Communication
-
-Application professionnelle de passation, d’analyse et de restitution d’un inventaire original de préférences de communication. Elle est conçue pour des séminaires animés par des formateurs qualifiés et pour un déploiement complet sur Netlify.
+Version 1.2.0. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle structure les résultats autour de la Structure de Personnalité, de la Base, de la Phase actuelle, des Perceptions, des Canaux de Communication et des Besoins Psychologiques.
 
 ## Ce que contient l’application
 
@@ -22,25 +18,25 @@ Application professionnelle de passation, d’analyse et de restitution d’un i
 
 - authentification Netlify Identity pour les formateurs, avec roles `admin`, `superadmin` ou `formateur` ;
 - invitation, mot de passe oublié et reinitialisation directement dans l application ;
-- cookie de session applicatif securise apres validation du compte Identity ;
 - tableau de bord de toutes les passations ;
 - recherche, filtrage et export CSV ;
 - création et activation de sessions de séminaire ;
-- cartographie de six repères de communication ;
-- lecture distincte des préférences habituelles et de la dynamique actuelle ;
+- Structure de Personnalité à six Étages ;
+- Base proposée automatiquement puis validée par le formateur ;
+- Phase actuelle proposée à partir des Besoins Psychologiques puis validée par le formateur ;
 - indicateur de qualité : complétude, cohérence, différenciation, neutralité et rythme ;
-- analyse détaillée des canaux conseillés, ressources, motivations et vigilances ;
+- analyse détaillée des Perceptions, Canaux de Communication, Points Forts et Besoins Psychologiques ;
 - zone de synthèse et de notes réservée au formateur ;
 - statut de suivi : en cours, à analyser, analysé, restitué ;
 - rapport professionnel imprimable ou enregistrable en PDF.
 
 ## Positionnement méthodologique et propriété intellectuelle
 
-L’outil livré est un **inventaire pédagogique original**. Il ne reprend aucun questionnaire, algorithme de cotation, rapport ou support PCM non public. Il ne doit pas être présenté comme un Profil PCM officiel et ne détermine pas automatiquement une Base ou une Phase PCM.
+L’application reprend la terminologie du Process Communication Model® : Analyseur, Persévérant, Empathique, Imagineur, Énergiseur et Promoteur, ainsi que les notions de Base, Phase, Perceptions, Canaux de Communication et Besoins Psychologiques.
 
-Les noms utilisés pour les six repères sont volontairement génériques : Analyse, Conviction, Relation, Réflexion, Créativité et Action. La « dynamique actuelle » est une mesure déclarative propre à cette application ; elle ne correspond pas à la Phase PCM.
+Le **jeu d’items intégré est un inventaire Milliminds** conçu pour une restitution par un formateur certifié. Il ne reproduit pas le questionnaire propriétaire PCM Profile ni sa clé de cotation. Le logiciel propose une Base et une Phase à partir des réponses ; le formateur les confirme ou les ajuste dans le rapport avant restitution.
 
-Si Milliminds obtient une autorisation écrite de Kahler Communications ou un accès officiel à une API/licence d’intégration, le moteur peut être remplacé ou raccordé sans modifier l’expérience utilisateur générale.
+Si un jeu d’items et une méthode de cotation licenciés sont fournis par leur titulaire, l’architecture peut être raccordée à cette source sans modifier l’expérience générale de passation et de restitution.
 
 ## Architecture
 
@@ -50,7 +46,7 @@ Si Milliminds obtient une autorisation écrite de Kahler Communications ou un ac
 - schéma et données : migrations SQL versionnées ;
 - calcul : effectué exclusivement côté serveur ;
 - stockage des jetons participants : empreinte SHA-256 uniquement ;
-- session administrateur : signature HMAC, cookie `HttpOnly`, `SameSite=Strict`, durée 8 h ;
+- authentification administrateur : Netlify Identity et contrôle des rôles côté fonction ;
 - protections : CSP, en-têtes de sécurité, contrôle d’origine et limitation de débit Netlify.
 
 ## Base de données
@@ -58,7 +54,7 @@ Si Milliminds obtient une autorisation écrite de Kahler Communications ou un ac
 Les migrations se trouvent dans `netlify/database/migrations/` et créent :
 
 - `assessment_versions` : versions de l’inventaire ;
-- `dimensions` : référentiel des six repères ;
+- `dimensions` : référentiel des six Types de Personnalité ;
 - `seminar_sessions` : sessions de séminaire ;
 - `questionnaire_items` : 72 affirmations et clés de cotation ;
 - `participants` : identité minimale et consentement ;
@@ -78,7 +74,7 @@ Créez un dépôt privé, copiez le contenu de ce dossier à sa racine, puis pou
 ```bash
 git init
 git add .
-git commit -m "Application Repères Communication"
+git commit -m "Inventaire PCM Milliminds"
 git branch -M main
 git remote add origin URL_DU_DEPOT
 git push -u origin main
@@ -118,7 +114,7 @@ Variable facultative recommandee :
 ### 4. Controle apres deploiement
 
 - ouvrir `/api/health` : la reponse doit contenir `"ok": true` ;
-- ouvrir `/admin` et verifier **Version 1.1.3** ;
+- ouvrir `/admin` et verifier **Version 1.2.0** ;
 - se connecter avec un utilisateur Netlify Identity ayant le role `admin`, `superadmin` ou `formateur` ;
 - verifier que le tableau de bord se charge sans appel a `/api/admin/login` ;
 - tester **Mot de passe oublie ?** puis l ecran de definition du nouveau mot de passe.
@@ -141,7 +137,7 @@ npm test
 npm run build
 ```
 
-Les tests vérifient notamment la cotation inversée, le classement des repères, les indicateurs de qualité et l’équilibre du questionnaire : 72 affirmations, 12 par dimension, dont 54 sur les habitudes et 18 sur la dynamique actuelle.
+Les tests vérifient notamment la cotation inversée, l’ordre relatif de la Structure, les indicateurs de qualité et l’équilibre du questionnaire : 72 affirmations, dont 54 pour la Structure de Personnalité et 18 pour les Besoins Psychologiques associés à la Phase actuelle.
 
 ## Conseils d’exploitation
 
