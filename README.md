@@ -98,41 +98,30 @@ Dans Netlify :
 
 Netlify détecte `@netlify/database` et les migrations placées dans `netlify/database/migrations`. La base PostgreSQL est provisionnée et les migrations sont appliquées au déploiement.
 
-### 3. Définir les variables d’environnement
+### 3. Configurer l authentification
 
-Dans **Project configuration → Environment variables**, ajouter :
+Cette version utilise uniquement **Netlify Identity** pour l espace formateur. Les anciennes variables `SESSION_SECRET`, `ADMIN_EMAIL` et `ADMIN_PASSWORD` ne sont plus utilisees.
+
+Dans **Identity > Users** :
+
+1. inviter ou ouvrir le compte concerne ;
+2. lui attribuer un role autorise : `formateur`, `admin` ou `superadmin` ;
+3. definir le mot de passe via le lien d invitation ou le flux **Mot de passe oublie ?** ;
+4. apres un changement de role, se deconnecter puis se reconnecter pour renouveler le jeton.
+
+Variable facultative recommandee :
 
 | Variable | Valeur attendue |
 | --- | --- |
-| `SESSION_SECRET` | chaine aleatoire d au moins 32 caracteres |
-| `APP_ORIGIN` | URL exacte du site, sans barre finale, ex. `https://nom-du-site.netlify.app` |
-| `ADMIN_EMAIL` | facultatif : ancien compte de secours |
-| `ADMIN_PASSWORD` | facultatif : mot de passe de secours correspondant |
+| `APP_ORIGIN` | URL exacte du site, sans barre finale, ex. `https://pcmprocess.netlify.app` |
 
-Pour générer une clé de session :
+### 4. Controle apres deploiement
 
-```bash
-openssl rand -base64 48
-```
-
-Relancer ensuite un déploiement pour appliquer les variables.
-
-
-### 4. Autoriser un formateur avec Netlify Identity
-
-1. Activer **Identity** dans le projet Netlify.
-2. Dans **Identity > Users**, inviter ou ouvrir l utilisateur concerne.
-3. Dans ses metadonnees, attribuer un role autorise : `formateur`, `admin` ou `superadmin`.
-4. L utilisateur definit son mot de passe via l invitation. En cas d oubli, le lien de recuperation revient maintenant dans l application sur l ecran de nouveau mot de passe.
-5. Apres une modification de role, se deconnecter puis se reconnecter afin de renouveler le jeton Identity.
-
-### 5. Contrôler le premier démarrage
-
-- ouvrir `/api/health` : la réponse doit contenir `"ok": true` ;
-- ouvrir `/` : la session « Séminaire Milliminds » doit apparaître ;
-- ouvrir `/admin` et se connecter avec les variables configurées ;
-- effectuer une passation de contrôle complète ;
-- vérifier le résultat, enregistrer une note de restitution et tester l’impression PDF.
+- ouvrir `/api/health` : la reponse doit contenir `"ok": true` ;
+- ouvrir `/admin` et verifier **Version 1.1.3** ;
+- se connecter avec un utilisateur Netlify Identity ayant le role `admin`, `superadmin` ou `formateur` ;
+- verifier que le tableau de bord se charge sans appel a `/api/admin/login` ;
+- tester **Mot de passe oublie ?** puis l ecran de definition du nouveau mot de passe.
 
 ## Développement local
 

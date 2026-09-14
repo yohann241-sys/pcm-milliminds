@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { login as identityLogin, logout as identityLogout, requestPasswordRecovery } from "@netlify/identity";
+import { getUser as getIdentityUser, login as identityLogin, logout as identityLogout, requestPasswordRecovery } from "@netlify/identity";
 import { Brand, Icon, Notice, Spinner } from "../components/Brand";
 import { api, formatDate, navigate } from "../lib/api";
 import type { AssessmentListItem, DimensionDefinition } from "../lib/model";
@@ -16,6 +16,11 @@ function isRateLimitError(reason: unknown) {
 
 const RATE_LIMIT_MESSAGE =
   "Trop de tentatives ont été effectuées. Netlify a temporairement limité les connexions. Patientez quelques minutes avant de réessayer et évitez de cliquer plusieurs fois.";
+
+function hasAdminRole(roles: string[] | undefined, primaryRole?: string) {
+  const normalized = new Set([...(roles ?? []), ...(primaryRole ? [primaryRole] : [])].map((role) => String(role).toLowerCase()));
+  return ["admin", "superadmin", "formateur"].some((role) => normalized.has(role));
+}
 type DashboardData = {
   summary: { total: number; pending: number; reviewed: number; delivered: number; avgQuality: number };
   recent: AssessmentListItem[];
@@ -28,17 +33,24 @@ export default function AdminPage() {
   const [email, setEmail] = useState("");
 
   useEffect(() => {
-    api<{ authenticated: boolean; email: string }>("/admin/me")
-      .then((data) => { setEmail(data.email); setAuth("in"); })
+    getIdentityUser()
+      .then((user) => {
+        if (!user?.email || !hasAdminRole(user.roles, user.role)) {
+          setAuth("out");
+          return;
+        }
+        setEmail(user.email);
+        setAuth("in");
+      })
       .catch(() => setAuth("out"));
   }, []);
 
   if (auth === "loading") return <div className="admin-loading"><Spinner label="Vérification de l’accès" /></div>;
-  if (auth === "out") return <AdminLogin onAuthenticated={(value) => { setEmail(value); setAuth("in"); }} />;
-  return <AdminWorkspace email={email} onLogout={() => setAuth("out")} />;
+  if (auth === "out") return <AdminLogin />;
+  return <AdminWorkspace email={email} />;
 }
 
-function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => void }) {
+function AdminLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -55,38 +67,22 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
     }
     setError("");
     setLoading(true);
-    let identityAuthenticated = false;
     try {
-      await identityLogin(email.trim().toLowerCase(), password);
-      identityAuthenticated = true;
-      const result = await api<{ email: string }>("/admin/login", {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      onAuthenticated(result.email);
-      return;
-    } catch (identityReason) {
-      if (isRateLimitError(identityReason)) {
+      const user = await identityLogin(email.trim().toLowerCase(), password);
+      if (!user?.email) {
+        throw new Error("Connexion Netlify Identity incomplète.");
+      }
+      if (!hasAdminRole(user.roles, user.role)) {
+        await identityLogout().catch(() => undefined);
+        setError("Compte reconnu, mais le rôle admin, superadmin ou formateur est absent.");
+        return;
+      }
+      window.location.href = "/admin";
+    } catch (reason) {
+      if (isRateLimitError(reason)) {
         setError(RATE_LIMIT_MESSAGE);
-        return;
-      }
-      if (identityAuthenticated) {
-        setError(identityReason instanceof Error ? identityReason.message : "Ce compte n'est pas autorisé à accéder à l'espace formateur.");
-        return;
-      }
-      try {
-        const result = await api<{ email: string }>("/admin/login", {
-          method: "POST",
-          body: JSON.stringify({ email, password }),
-        });
-        onAuthenticated(result.email);
-        return;
-      } catch (legacyReason) {
-        if (isRateLimitError(legacyReason)) {
-          setError(RATE_LIMIT_MESSAGE);
-        } else {
-          setError(legacyReason instanceof Error ? legacyReason.message : "Connexion impossible.");
-        }
+      } else {
+        setError(reason instanceof Error ? reason.message : "Connexion impossible.");
       }
     } finally {
       setLoading(false);
@@ -180,14 +176,14 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
             </>
           )}
           <small className="security-copy"><Icon name="shield" size={15}/> Authentification sécurisée par Netlify Identity</small>
-          <small className="build-version">Version 1.1.2</small>
+          <small className="build-version">Version 1.1.3</small>
         </form>
       </section>
     </main>
   );
 }
 
-function AdminWorkspace({ email, onLogout }: { email: string; onLogout: () => void }) {
+function AdminWorkspace({ email }: { email: string }) {
   const [tab, setTab] = useState<AdminTab>("overview");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [assessments, setAssessments] = useState<AssessmentListItem[]>([]);
@@ -217,9 +213,8 @@ function AdminWorkspace({ email, onLogout }: { email: string; onLogout: () => vo
   useEffect(() => { load(); }, []);
 
   const logout = async () => {
-    await api("/admin/logout", { method: "POST" }).catch(() => undefined);
     await identityLogout().catch(() => undefined);
-    onLogout();
+    window.location.href = "/admin";
   };
 
   const filtered = useMemo(() => assessments.filter((item) => {

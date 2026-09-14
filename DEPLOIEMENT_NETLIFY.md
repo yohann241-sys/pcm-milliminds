@@ -1,13 +1,19 @@
-# Déploiement Netlify — Version 1.1.1
+# Deploiement Netlify — Version 1.1.3
 
-1. Décompresser l'archive et remplacer les fichiers du dépôt GitHub par ceux de cette version.
-2. Valider les changements sur la branche `main`.
-3. Attendre la fin du déploiement Netlify.
-4. Ouvrir `/admin` et vérifier que **Version 1.1.1** apparaît au bas de la carte de connexion.
-5. Vérifier que Netlify **Identity** est activé et que l'adresse e-mail formateur existe dans **Identity > Users**.
-6. Donner au compte un rôle autorisé : `formateur`, `admin` ou `superadmin`.
-7. Cliquer sur **Mot de passe oublié ?**, saisir l'e-mail et choisir **Envoyer le lien de réinitialisation**.
-8. Ouvrir l'e-mail reçu. Le lien doit revenir sur l'application et afficher **Nouveau mot de passe**.
-9. Saisir et confirmer le nouveau mot de passe, puis revenir à la connexion.
+1. Remplacer les fichiers du depot par ceux de cette archive et valider sur `main`.
+2. Attendre la fin du deploiement Netlify.
+3. Ouvrir `/admin` et verifier **Version 1.1.3**.
+4. Dans **Identity > Users**, verifier que le compte existe et possede `admin`, `superadmin` ou `formateur`.
+5. Aucun `SESSION_SECRET`, `ADMIN_EMAIL` ou `ADMIN_PASSWORD` n est requis dans cette version.
+6. Si `APP_ORIGIN` est defini, sa valeur doit etre exactement l URL publique du site, sans barre finale.
+7. Tester une connexion puis ouvrir le tableau de bord.
 
-Si la page `/admin` n'affiche pas **Version 1.1.1**, l'ancien déploiement est encore celui qui est servi.
+## Corrections 1.1.3
+
+- suppression du double systeme de connexion ;
+- suppression de l appel `/api/admin/login` qui provoquait le 502 ;
+- Netlify Identity devient l unique source d authentification admin/formateur ;
+- controle des roles cote navigateur et cote fonction Netlify ;
+- correction de la CSP pour autoriser le script inline Netlify signale par le navigateur via son hash SHA-256, sans activer `unsafe-inline` pour les scripts ;
+- conservation du flux invitation et reinitialisation de mot de passe ;
+- conservation du logo Milliminds corrige et du libelle Formation / Communication.

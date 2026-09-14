@@ -1,6 +1,6 @@
 import { getDatabase } from "@netlify/database";
 import { getUser as getIdentityUser } from "@netlify/identity";
-import type { Config } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 import { buildTrainerSynthesis, calculateScores } from "../../src/lib/scoring";
 import type {
   AnswerPayload,
@@ -11,13 +11,9 @@ import type {
   ScoreResult,
 } from "../../src/lib/model";
 import {
-  clearSessionCookie,
-  createAdminSession,
   createParticipantToken,
   hashToken,
-  readAdminSession,
   safeEqual,
-  sessionCookie,
 } from "./auth";
 
 const db = getDatabase();
@@ -57,10 +53,13 @@ const routePath = (request: Request) => {
     .replace(/^\/api/, "") || "/";
 };
 
-function requireAdmin(request: Request) {
-  const session = readAdminSession(request);
-  if (!session) throw new HttpError(401, "Session administrateur requise.");
-  return session;
+async function requireAdmin() {
+  const user = await getIdentityUser();
+  if (!user?.email) throw new HttpError(401, "Connexion Netlify Identity requise.");
+  const roles = new Set([...(user.roles ?? []), ...(user.role ? [user.role] : [])].map((role) => String(role).toLowerCase()));
+  const allowed = ["admin", "superadmin", "formateur"].some((role) => roles.has(role));
+  if (!allowed) throw new HttpError(403, "Compte reconnu, mais rôle admin, superadmin ou formateur absent.");
+  return { email: user.email.trim().toLowerCase(), roles: [...roles] };
 }
 
 function bearerToken(request: Request) {
@@ -296,48 +295,8 @@ async function submitAssessment(request: Request, assessmentId: string) {
   });
 }
 
-async function adminLogin(request: Request) {
-  assertMutationOrigin(request);
-  if (!process.env.SESSION_SECRET) {
-    throw new HttpError(503, "La cle de session administrateur n'est pas configuree.");
-  }
-
-  const identityUser = await getIdentityUser();
-  if (identityUser?.email) {
-    const identityRoles = new Set([
-      ...(identityUser.roles ?? []),
-      ...(identityUser.role ? [identityUser.role] : []),
-    ].map((role) => String(role).toLowerCase()));
-    const allowed = ["admin", "superadmin", "formateur"].some((role) => identityRoles.has(role));
-    const email = identityUser.email.trim().toLowerCase();
-    if (!allowed) {
-      await audit(email, "admin_identity_role_refused", "authentication", undefined, { roles: [...identityRoles] });
-      throw new HttpError(403, "Compte reconnu, mais role administrateur ou formateur absent dans Netlify Identity.");
-    }
-    const token = createAdminSession(email);
-    await audit(email, "admin_identity_login", "authentication");
-    return json({ authenticated: true, email, provider: "netlify-identity" }, 200, { "set-cookie": sessionCookie(token) });
-  }
-
-  const body = await parseBody(request);
-  const email = clean(body.email, 160).toLowerCase();
-  const password = String(body.password ?? "");
-  const expectedEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  const expectedPassword = process.env.ADMIN_PASSWORD;
-  if (!expectedEmail || !expectedPassword) {
-    throw new HttpError(401, "Compte Netlify Identity requis ou acces administrateur historique non configure.");
-  }
-  if (!safeEqual(email, expectedEmail) || !safeEqual(password, expectedPassword)) {
-    await audit(email || "inconnu", "admin_login_failed", "authentication");
-    throw new HttpError(401, "Identifiants incorrects.");
-  }
-  const token = createAdminSession(email);
-  await audit(email, "admin_login", "authentication");
-  return json({ authenticated: true, email, provider: "legacy" }, 200, { "set-cookie": sessionCookie(token) });
-}
-
 async function dashboard(request: Request) {
-  requireAdmin(request);
+  await requireAdmin();
   const [summaryRows, recentRows, dimensionRows, sessionRows] = await Promise.all([
     db.sql<Record<string, unknown>>`
       SELECT COUNT(*)::int AS total,
@@ -415,7 +374,7 @@ function mapAssessmentListRow(row: Record<string, unknown>) {
 }
 
 async function listAssessments(request: Request) {
-  requireAdmin(request);
+  await requireAdmin();
   const url = new URL(request.url);
   const search = clean(url.searchParams.get("search"), 80);
   const status = clean(url.searchParams.get("status"), 20);
@@ -436,7 +395,7 @@ async function listAssessments(request: Request) {
 }
 
 async function assessmentDetail(request: Request, assessmentId: string) {
-  requireAdmin(request);
+  await requireAdmin();
   const [rows, answerRows, dimensionRows] = await Promise.all([
     db.sql<Record<string, unknown>>`
       SELECT a.id, a.status, a.created_at, a.submitted_at, a.quality_score, a.score_json,
@@ -480,7 +439,7 @@ async function assessmentDetail(request: Request, assessmentId: string) {
 
 async function updateInterpretation(request: Request, assessmentId: string) {
   assertMutationOrigin(request);
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin();
   const body = await parseBody(request);
   const synthesis = clean(body.synthesis, 5000);
   const observations = clean(body.observations, 5000);
@@ -511,7 +470,7 @@ async function updateInterpretation(request: Request, assessmentId: string) {
 
 async function updateStatus(request: Request, assessmentId: string) {
   assertMutationOrigin(request);
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin();
   const body = await parseBody(request);
   const status = clean(body.status, 20) as AssessmentStatus;
   if (!["submitted", "reviewed", "delivered"].includes(status)) throw new HttpError(400, "Statut invalide.");
@@ -522,7 +481,7 @@ async function updateStatus(request: Request, assessmentId: string) {
 
 async function createSession(request: Request) {
   assertMutationOrigin(request);
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin();
   const body = await parseBody(request);
   const name = clean(body.name, 160);
   const organization = clean(body.organization, 160) || "Milliminds";
@@ -540,7 +499,7 @@ async function createSession(request: Request) {
 
 async function activateSession(request: Request, sessionId: string) {
   assertMutationOrigin(request);
-  const admin = requireAdmin(request);
+  const admin = await requireAdmin();
   const client = await db.pool.connect();
   try {
     await client.query("BEGIN");
@@ -561,7 +520,7 @@ async function activateSession(request: Request, sessionId: string) {
 const csvCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 
 async function exportCsv(request: Request) {
-  requireAdmin(request);
+  await requireAdmin();
   const rows = await db.sql<Record<string, unknown>>`
     SELECT a.id, p.last_name, p.first_name, p.organization, s.name AS session_name,
            a.status, a.submitted_at, a.quality_score, a.score_json
@@ -593,7 +552,7 @@ async function exportCsv(request: Request) {
   });
 }
 
-export default async (request: Request) => {
+export default async (request: Request, _context: Context) => {
   try {
     const path = routePath(request);
     const method = request.method.toUpperCase();
@@ -607,13 +566,9 @@ export default async (request: Request) => {
     const submitMatch = path.match(/^\/public\/assessments\/([0-9a-f-]{36})\/submit$/i);
     if (method === "POST" && submitMatch) return submitAssessment(request, submitMatch[1]);
 
-    if (method === "POST" && path === "/admin/login") return adminLogin(request);
-    if (method === "POST" && path === "/admin/logout") {
-      return json({ authenticated: false }, 200, { "set-cookie": clearSessionCookie() });
-    }
     if (method === "GET" && path === "/admin/me") {
-      const admin = requireAdmin(request);
-      return json({ authenticated: true, ...admin });
+      const admin = await requireAdmin();
+      return json({ authenticated: true, ...admin, provider: "netlify-identity" });
     }
     if (method === "GET" && path === "/admin/dashboard") return dashboard(request);
     if (method === "GET" && path === "/admin/assessments") return listAssessments(request);
