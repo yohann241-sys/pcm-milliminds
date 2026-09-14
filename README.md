@@ -1,6 +1,11 @@
 # Milliminds — Inventaire de personnalité PCM
 
-Version 1.2.0. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle structure les résultats autour de la Structure de Personnalité, de la Base, de la Phase actuelle, des Perceptions, des Canaux de Communication et des Besoins Psychologiques.
+Version 1.2.1. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle structure les résultats autour de la Structure de Personnalité, de la Base, de la Phase actuelle, des Perceptions, des Canaux de Communication et des Besoins Psychologiques.
+
+## Correction v1.2.1 — ordre des Étages
+
+Dans la restitution et dans l’export PDF, la Base validée est toujours positionnée à l’Étage 1, au bas de la Structure de Personnalité. Les cinq autres Types occupent les Étages 2 à 6 au-dessus. La Phase actuelle est signalée sur l’Étage du Type concerné ; lorsqu’elle est différente de la Base, elle apparaît donc nécessairement au-dessus de l’Étage 1.
+
 
 ## Ce que contient l’application
 
@@ -114,7 +119,7 @@ Variable facultative recommandee :
 ### 4. Controle apres deploiement
 
 - ouvrir `/api/health` : la reponse doit contenir `"ok": true` ;
-- ouvrir `/admin` et verifier **Version 1.2.0** ;
+- ouvrir `/admin` et verifier **Version 1.2.1** ;
 - se connecter avec un utilisateur Netlify Identity ayant le role `admin`, `superadmin` ou `formateur` ;
 - verifier que le tableau de bord se charge sans appel a `/api/admin/login` ;
 - tester **Mot de passe oublie ?** puis l ecran de definition du nouveau mot de passe.

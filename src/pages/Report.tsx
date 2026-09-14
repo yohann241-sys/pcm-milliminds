@@ -50,7 +50,17 @@ export default function ReportPage({ assessmentId }: { assessmentId: string }) {
   const phase = byCode[phaseCode];
   const baseRef = PCM_REFERENCE[baseCode];
   const phaseRef = PCM_REFERENCE[phaseCode];
-  const floorOrder = [...ordered].reverse();
+
+  // La Structure PCM est affichée comme un immeuble :
+  // - la Base validée est TOUJOURS l'Étage 1, au niveau le plus bas ;
+  // - les cinq autres Types occupent les Étages 2 à 6 en conservant
+  //   leur ordre relatif issu des scores de Structure ;
+  // - si la Phase est différente de la Base, elle se trouve donc
+  //   nécessairement sur un étage supérieur.
+  const baseScore = detail.scores.dimensions.find((score) => score.code === baseCode) ?? ordered[0];
+  const otherFloors = ordered.filter((score) => score.code !== baseCode);
+  const bottomToTop = [baseScore, ...otherFloors];
+  const floorOrder = [...bottomToTop].reverse();
 
   return (
     <main className="report-shell">
@@ -88,17 +98,26 @@ export default function ReportPage({ assessmentId }: { assessmentId: string }) {
           <div className="pcm-structure-layout">
             <div className="pcm-building" aria-label="Structure de Personnalité PCM">
               {floorOrder.map((score, index) => {
-                const d = byCode[score.code]; const isBase = score.code === baseCode; const isPhase = score.code === phaseCode;
+                const d = byCode[score.code];
+                const isBase = score.code === baseCode;
+                const isPhase = score.code === phaseCode;
+                const floorNumber = floorOrder.length - index;
                 return <div className={`pcm-floor ${isBase ? "is-base" : ""} ${isPhase ? "is-phase" : ""}`} key={score.code} style={{ "--dimension": d.color } as React.CSSProperties}>
-                  <span className="pcm-floor-number">ÉTAGE {floorOrder.length-index}</span><strong>{d.shortName}</strong><em>{Math.round(score.structure)}%</em>{isBase && <b>BASE</b>}{isPhase && <b>PHASE</b>}
+                  <span className="pcm-floor-number">ÉTAGE {floorNumber}</span>
+                  <strong>{d.shortName}</strong>
+                  <em>{Math.round(score.structure)}%</em>
+                  <span className="pcm-floor-markers">
+                    {isBase && <b className="pcm-marker-base">BASE</b>}
+                    {isPhase && <b className="pcm-marker-phase">PHASE ACTUELLE</b>}
+                  </span>
                 </div>;
               })}
               <div className="pcm-foundation">Structure de Personnalité</div>
             </div>
             <div className="pcm-structure-copy">
               <h3>Lecture de la structure</h3>
-              <p>Chaque personne possède les six Types de Personnalité dans un ordre qui lui est propre. La Base constitue le premier Étage et reste la référence privilégiée pour la connexion : <strong>Perception + Canal de Communication</strong>.</p>
-              <p>Dans cet inventaire, l’ordre est calculé à partir des réponses de Structure puis validé par le formateur lors de l’entretien.</p>
+              <p>Chaque personne possède les six Types de Personnalité dans un ordre qui lui est propre. La <strong>Base est toujours positionnée à l’Étage 1</strong>, au bas de la structure. Elle reste la référence privilégiée pour la connexion : <strong>Perception + Canal de Communication</strong>.</p>
+              <p>Les cinq autres Types occupent les Étages 2 à 6 au-dessus de la Base. La <strong>Phase actuelle</strong> est signalée sur l’Étage correspondant au Type concerné. Si la Phase est identique à la Base, les deux repères apparaissent ensemble à l’Étage 1.</p>
               <div className="pcm-legend"><span><i className="legend-base"/> Base</span><span><i className="legend-phase"/> Phase actuelle</span></div>
             </div>
           </div>

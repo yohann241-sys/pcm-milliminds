@@ -176,7 +176,7 @@ function AdminLogin() {
             </>
           )}
           <small className="security-copy"><Icon name="shield" size={15}/> Authentification sécurisée par Netlify Identity</small>
-          <small className="build-version">Version 1.2.0</small>
+          <small className="build-version">Version 1.2.1</small>
         </form>
       </section>
     </main>

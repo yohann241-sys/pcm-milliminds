@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/Brand.tsx","./src/components/Charts.tsx","./src/lib/api.ts","./src/lib/model.ts","./src/lib/scoring.ts","./src/pages/Admin.tsx","./src/pages/Participant.tsx","./src/pages/Report.tsx"],"errors":true,"version":"5.8.3"}
