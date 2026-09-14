@@ -260,7 +260,7 @@ function Questionnaire({ initial, onComplete, onCancel }: { initial: SavedDraft;
           {index === total - 1 ? (
             <button className="button button--primary" type="button" disabled={submitting || answered !== total} onClick={submit}>{submitting ? "Finalisation…" : <>Terminer <Icon name="check"/></>}</button>
           ) : (
-            <button className="button button--ghost" type="button" disabled={currentValue === undefined} onClick={() => setIndex((current) => Math.min(total - 1, current + 1))}>Suivant <Icon name="arrow"/></button>
+            <button className="button button--ghost" type="button" onClick={() => setIndex((current) => Math.min(total - 1, current + 1))}>{currentValue === undefined ? "Passer" : "Suivant"} <Icon name="arrow"/></button>
           )}
         </div>
         <div className="answered-count">{answered} réponse{answered > 1 ? "s" : ""} sur {total}</div>

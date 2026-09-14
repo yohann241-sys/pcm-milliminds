@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { getUser as getIdentityUser } from "@netlify/identity";
 import type { Config } from "@netlify/functions";
 import { buildTrainerSynthesis, calculateScores } from "../../src/lib/scoring";
 import type {
@@ -297,13 +298,34 @@ async function submitAssessment(request: Request, assessmentId: string) {
 
 async function adminLogin(request: Request) {
   assertMutationOrigin(request);
+  if (!process.env.SESSION_SECRET) {
+    throw new HttpError(503, "La cle de session administrateur n'est pas configuree.");
+  }
+
+  const identityUser = await getIdentityUser();
+  if (identityUser?.email) {
+    const identityRoles = new Set([
+      ...(identityUser.roles ?? []),
+      ...(identityUser.role ? [identityUser.role] : []),
+    ].map((role) => String(role).toLowerCase()));
+    const allowed = ["admin", "superadmin", "formateur"].some((role) => identityRoles.has(role));
+    const email = identityUser.email.trim().toLowerCase();
+    if (!allowed) {
+      await audit(email, "admin_identity_role_refused", "authentication", undefined, { roles: [...identityRoles] });
+      throw new HttpError(403, "Compte reconnu, mais role administrateur ou formateur absent dans Netlify Identity.");
+    }
+    const token = createAdminSession(email);
+    await audit(email, "admin_identity_login", "authentication");
+    return json({ authenticated: true, email, provider: "netlify-identity" }, 200, { "set-cookie": sessionCookie(token) });
+  }
+
   const body = await parseBody(request);
   const email = clean(body.email, 160).toLowerCase();
   const password = String(body.password ?? "");
   const expectedEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const expectedPassword = process.env.ADMIN_PASSWORD;
-  if (!expectedEmail || !expectedPassword || !process.env.SESSION_SECRET) {
-    throw new HttpError(503, "L’accès administrateur n’est pas encore configuré.");
+  if (!expectedEmail || !expectedPassword) {
+    throw new HttpError(401, "Compte Netlify Identity requis ou acces administrateur historique non configure.");
   }
   if (!safeEqual(email, expectedEmail) || !safeEqual(password, expectedPassword)) {
     await audit(email || "inconnu", "admin_login_failed", "authentication");
@@ -311,7 +333,7 @@ async function adminLogin(request: Request) {
   }
   const token = createAdminSession(email);
   await audit(email, "admin_login", "authentication");
-  return json({ authenticated: true, email }, 200, { "set-cookie": sessionCookie(token) });
+  return json({ authenticated: true, email, provider: "legacy" }, 200, { "set-cookie": sessionCookie(token) });
 }
 
 async function dashboard(request: Request) {

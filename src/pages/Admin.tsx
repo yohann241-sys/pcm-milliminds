@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { login as identityLogin, logout as identityLogout, requestPasswordRecovery } from "@netlify/identity";
 import { Brand, Icon, Notice, Spinner } from "../components/Brand";
 import { api, formatDate, navigate } from "../lib/api";
 import type { AssessmentListItem, DimensionDefinition } from "../lib/model";
@@ -32,20 +33,59 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [recoverySent, setRecoverySent] = useState(false);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
     setLoading(true);
+    let identityAuthenticated = false;
     try {
+      await identityLogin(email.trim().toLowerCase(), password);
+      identityAuthenticated = true;
       const result = await api<{ email: string }>("/admin/login", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({}),
       });
       onAuthenticated(result.email);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Connexion impossible.");
+      return;
+    } catch (identityReason) {
+      if (identityAuthenticated) {
+        setError(identityReason instanceof Error ? identityReason.message : "Ce compte n'est pas autorise a acceder a l'espace formateur.");
+        return;
+      }
+      try {
+        const result = await api<{ email: string }>("/admin/login", {
+          method: "POST",
+          body: JSON.stringify({ email, password }),
+        });
+        onAuthenticated(result.email);
+        return;
+      } catch (legacyReason) {
+        setError(legacyReason instanceof Error ? legacyReason.message : "Connexion impossible.");
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const recover = async () => {
+    setError("");
+    setRecoverySent(false);
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      setError("Saisissez d'abord votre adresse e-mail.");
+      return;
+    }
+    setRecoveryLoading(true);
+    try {
+      await requestPasswordRecovery(normalizedEmail);
+      setRecoverySent(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "L'e-mail de reinitialisation n'a pas pu etre envoye.");
+    } finally {
+      setRecoveryLoading(false);
     }
   };
 
@@ -67,10 +107,12 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
           <h2>Connexion formateur</h2>
           <p>Accédez aux résultats, analyses et comptes rendus de restitution.</p>
           {error && <Notice type="error">{error}</Notice>}
+          {recoverySent && <Notice type="success">Un e-mail de reinitialisation vient de vous etre envoye. Ouvrez le lien recu pour definir votre nouveau mot de passe.</Notice>}
           <label className="field"><span>Adresse e-mail</span><input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="formateur@milliminds.com" /></label>
           <label className="field"><span>Mot de passe</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••••••" /></label>
           <button className="button button--primary button--wide" disabled={loading}>{loading ? "Connexion…" : <>Accéder à l’espace <Icon name="arrow"/></>}</button>
-          <small className="security-copy"><Icon name="shield" size={15}/> Session chiffrée et limitée à huit heures</small>
+          <button className="text-button password-recovery-button" type="button" disabled={recoveryLoading} onClick={recover}>{recoveryLoading ? "Envoi…" : "Mot de passe oublié ?"}</button>
+          <small className="security-copy"><Icon name="shield" size={15}/> Compte Netlify Identity ou accès administrateur historique</small>
         </form>
       </section>
     </main>
@@ -108,6 +150,7 @@ function AdminWorkspace({ email, onLogout }: { email: string; onLogout: () => vo
 
   const logout = async () => {
     await api("/admin/logout", { method: "POST" }).catch(() => undefined);
+    await identityLogout().catch(() => undefined);
     onLogout();
   };
 

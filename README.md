@@ -16,7 +16,9 @@ Application professionnelle de passation, d’analyse et de restitution d’un i
 
 ### Espace administrateur / formateur
 
-- authentification séparée et cookie de session sécurisé ;
+- authentification Netlify Identity pour les formateurs, avec roles `admin`, `superadmin` ou `formateur` ;
+- invitation, mot de passe oublié et reinitialisation directement dans l application ;
+- cookie de session applicatif securise apres validation du compte Identity ;
 - tableau de bord de toutes les passations ;
 - recherche, filtrage et export CSV ;
 - création et activation de sessions de séminaire ;
@@ -98,10 +100,10 @@ Dans **Project configuration → Environment variables**, ajouter :
 
 | Variable | Valeur attendue |
 | --- | --- |
-| `ADMIN_EMAIL` | adresse de connexion du formateur principal |
-| `ADMIN_PASSWORD` | mot de passe unique et long, idéalement 16 caractères ou plus |
-| `SESSION_SECRET` | chaîne aléatoire d’au moins 32 caractères |
+| `SESSION_SECRET` | chaine aleatoire d au moins 32 caracteres |
 | `APP_ORIGIN` | URL exacte du site, sans barre finale, ex. `https://nom-du-site.netlify.app` |
+| `ADMIN_EMAIL` | facultatif : ancien compte de secours |
+| `ADMIN_PASSWORD` | facultatif : mot de passe de secours correspondant |
 
 Pour générer une clé de session :
 
@@ -111,7 +113,16 @@ openssl rand -base64 48
 
 Relancer ensuite un déploiement pour appliquer les variables.
 
-### 4. Contrôler le premier démarrage
+
+### 4. Autoriser un formateur avec Netlify Identity
+
+1. Activer **Identity** dans le projet Netlify.
+2. Dans **Identity > Users**, inviter ou ouvrir l utilisateur concerne.
+3. Dans ses metadonnees, attribuer un role autorise : `formateur`, `admin` ou `superadmin`.
+4. L utilisateur definit son mot de passe via l invitation. En cas d oubli, le lien de recuperation revient maintenant dans l application sur l ecran de nouveau mot de passe.
+5. Apres une modification de role, se deconnecter puis se reconnecter afin de renouveler le jeton Identity.
+
+### 5. Contrôler le premier démarrage
 
 - ouvrir `/api/health` : la réponse doit contenir `"ok": true` ;
 - ouvrir `/` : la session « Séminaire Milliminds » doit apparaître ;

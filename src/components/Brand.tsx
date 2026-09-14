@@ -11,7 +11,7 @@ export function Brand({ compact = false, dark = true }: BrandProps) {
       </span>
       {!compact && (
         <span className="brand__product">
-          <strong>Repères</strong>
+          <strong>Formation</strong>
           <small>Communication</small>
         </span>
       )}
