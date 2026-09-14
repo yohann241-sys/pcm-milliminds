@@ -5,6 +5,17 @@ import { api, formatDate, navigate } from "../lib/api";
 import type { AssessmentListItem, DimensionDefinition } from "../lib/model";
 
 type AdminTab = "overview" | "results" | "sessions" | "method";
+
+function isRateLimitError(reason: unknown) {
+  const status = typeof reason === "object" && reason !== null && "status" in reason
+    ? Number((reason as { status?: unknown }).status)
+    : 0;
+  const message = reason instanceof Error ? reason.message.toLowerCase() : String(reason ?? "").toLowerCase();
+  return status === 429 || message.includes("rate limit") || message.includes("too many requests");
+}
+
+const RATE_LIMIT_MESSAGE =
+  "Trop de tentatives ont été effectuées. Netlify a temporairement limité les connexions. Patientez quelques minutes avant de réessayer et évitez de cliquer plusieurs fois.";
 type DashboardData = {
   summary: { total: number; pending: number; reviewed: number; delivered: number; avgQuality: number };
   recent: AssessmentListItem[];
@@ -32,12 +43,16 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-
+  const [mode, setMode] = useState<"login" | "forgot">("login");
   const [recoverySent, setRecoverySent] = useState(false);
   const [recoveryLoading, setRecoveryLoading] = useState(false);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (mode === "forgot") {
+      await recover();
+      return;
+    }
     setError("");
     setLoading(true);
     let identityAuthenticated = false;
@@ -51,8 +66,12 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
       onAuthenticated(result.email);
       return;
     } catch (identityReason) {
+      if (isRateLimitError(identityReason)) {
+        setError(RATE_LIMIT_MESSAGE);
+        return;
+      }
       if (identityAuthenticated) {
-        setError(identityReason instanceof Error ? identityReason.message : "Ce compte n'est pas autorise a acceder a l'espace formateur.");
+        setError(identityReason instanceof Error ? identityReason.message : "Ce compte n'est pas autorisé à accéder à l'espace formateur.");
         return;
       }
       try {
@@ -63,7 +82,11 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
         onAuthenticated(result.email);
         return;
       } catch (legacyReason) {
-        setError(legacyReason instanceof Error ? legacyReason.message : "Connexion impossible.");
+        if (isRateLimitError(legacyReason)) {
+          setError(RATE_LIMIT_MESSAGE);
+        } else {
+          setError(legacyReason instanceof Error ? legacyReason.message : "Connexion impossible.");
+        }
       }
     } finally {
       setLoading(false);
@@ -83,10 +106,27 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
       await requestPasswordRecovery(normalizedEmail);
       setRecoverySent(true);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "L'e-mail de reinitialisation n'a pas pu etre envoye.");
+      if (isRateLimitError(reason)) {
+        setError(RATE_LIMIT_MESSAGE);
+      } else {
+        setError(reason instanceof Error ? reason.message : "L'e-mail de réinitialisation n'a pas pu être envoyé.");
+      }
     } finally {
       setRecoveryLoading(false);
     }
+  };
+
+  const showForgot = () => {
+    setMode("forgot");
+    setError("");
+    setRecoverySent(false);
+    setPassword("");
+  };
+
+  const showLogin = () => {
+    setMode("login");
+    setError("");
+    setRecoverySent(false);
   };
 
   return (
@@ -104,15 +144,43 @@ function AdminLogin({ onAuthenticated }: { onAuthenticated: (email: string) => v
         <a href="/" className="back-home"><Icon name="back" size={17}/> Retour à la passation</a>
         <form className="login-card" onSubmit={submit}>
           <span className="login-icon"><Icon name="lock" size={25}/></span>
-          <h2>Connexion formateur</h2>
-          <p>Accédez aux résultats, analyses et comptes rendus de restitution.</p>
+          <h2>{mode === "forgot" ? "Réinitialiser le mot de passe" : "Connexion formateur"}</h2>
+          <p>
+            {mode === "forgot"
+              ? "Saisissez l'adresse e-mail enregistrée dans Netlify Identity. Vous recevrez un lien sécurisé pour créer un nouveau mot de passe."
+              : "Accédez aux résultats, analyses et comptes rendus de restitution."}
+          </p>
           {error && <Notice type="error">{error}</Notice>}
-          {recoverySent && <Notice type="success">Un e-mail de reinitialisation vient de vous etre envoye. Ouvrez le lien recu pour definir votre nouveau mot de passe.</Notice>}
-          <label className="field"><span>Adresse e-mail</span><input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="formateur@milliminds.com" /></label>
-          <label className="field"><span>Mot de passe</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••••••" /></label>
-          <button className="button button--primary button--wide" disabled={loading}>{loading ? "Connexion…" : <>Accéder à l’espace <Icon name="arrow"/></>}</button>
-          <button className="text-button password-recovery-button" type="button" disabled={recoveryLoading} onClick={recover}>{recoveryLoading ? "Envoi…" : "Mot de passe oublié ?"}</button>
-          <small className="security-copy"><Icon name="shield" size={15}/> Compte Netlify Identity ou accès administrateur historique</small>
+          {recoverySent && <Notice type="success">E-mail envoyé. Ouvrez le lien reçu : l'application affichera directement l'écran « Nouveau mot de passe ».</Notice>}
+          <label className="field">
+            <span>Adresse e-mail</span>
+            <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="formateur@milliminds.com" />
+          </label>
+          {mode === "login" && (
+            <label className="field">
+              <span>Mot de passe</span>
+              <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••••••" />
+            </label>
+          )}
+          {mode === "login" ? (
+            <>
+              <button className="button button--primary button--wide" disabled={loading}>{loading ? "Connexion…" : <>Accéder à l’espace <Icon name="arrow"/></>}</button>
+              <button className="password-recovery-button" type="button" onClick={showForgot}>
+                <Icon name="lock" size={17}/> Mot de passe oublié ?
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="button button--primary button--wide" disabled={recoveryLoading}>
+                {recoveryLoading ? "Envoi…" : <>Envoyer le lien de réinitialisation <Icon name="arrow"/></>}
+              </button>
+              <button className="password-recovery-back" type="button" onClick={showLogin}>
+                <Icon name="back" size={17}/> Retour à la connexion
+              </button>
+            </>
+          )}
+          <small className="security-copy"><Icon name="shield" size={15}/> Authentification sécurisée par Netlify Identity</small>
+          <small className="build-version">Version 1.1.2</small>
         </form>
       </section>
     </main>

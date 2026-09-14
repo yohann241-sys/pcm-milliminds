@@ -1,13 +1,13 @@
-# Mise en ligne - version Netlify Identity
+# Déploiement Netlify — Version 1.1.1
 
-1. Decompresser l archive et pousser le contenu sur le depot GitHub du projet.
-2. Dans Netlify, verifier le build `npm run build` et le dossier de publication `dist`.
-3. Verifier que **Identity** est active sur le projet.
-4. Dans **Identity > Users**, inviter ou selectionner le compte formateur.
-5. Attribuer dans les metadonnees du compte un role `formateur`, `admin` ou `superadmin`.
-6. Dans **Project configuration > Environment variables**, definir `SESSION_SECRET` et `APP_ORIGIN`. `ADMIN_EMAIL` et `ADMIN_PASSWORD` restent facultatifs comme acces historique de secours.
-7. Redeployer.
-8. Tester `/admin`, puis **Mot de passe oublie ?**. Le lien recu doit ouvrir l ecran **Nouveau mot de passe** de l application.
-9. Tester une passation complete et l espace formateur.
+1. Décompresser l'archive et remplacer les fichiers du dépôt GitHub par ceux de cette version.
+2. Valider les changements sur la branche `main`.
+3. Attendre la fin du déploiement Netlify.
+4. Ouvrir `/admin` et vérifier que **Version 1.1.1** apparaît au bas de la carte de connexion.
+5. Vérifier que Netlify **Identity** est activé et que l'adresse e-mail formateur existe dans **Identity > Users**.
+6. Donner au compte un rôle autorisé : `formateur`, `admin` ou `superadmin`.
+7. Cliquer sur **Mot de passe oublié ?**, saisir l'e-mail et choisir **Envoyer le lien de réinitialisation**.
+8. Ouvrir l'e-mail reçu. Le lien doit revenir sur l'application et afficher **Nouveau mot de passe**.
+9. Saisir et confirmer le nouveau mot de passe, puis revenir à la connexion.
 
-Important : `APP_ORIGIN` doit etre l URL exacte du site sans barre oblique finale. Ne placez jamais les mots de passe dans GitHub.
+Si la page `/admin` n'affiche pas **Version 1.1.1**, l'ancien déploiement est encore celui qui est servi.

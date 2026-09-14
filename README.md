@@ -1,4 +1,8 @@
-# Milliminds — Repères Communication
+## Version 1.1.1
+
+Cette version corrige l’affichage du logo Milliminds et le parcours Mot de passe oublié / réinitialisation Netlify Identity.
+
+# Milliminds — Formation Communication
 
 Application professionnelle de passation, d’analyse et de restitution d’un inventaire original de préférences de communication. Elle est conçue pour des séminaires animés par des formateurs qualifiés et pour un déploiement complet sur Netlify.
 

@@ -109,7 +109,7 @@ export default function ReportPage({ assessmentId }: { assessmentId: string }) {
           </div>
         </section>
 
-        <footer className="report-footer"><p><strong>Note méthodologique.</strong> Ce document restitue un inventaire pédagogique original de préférences déclarées. Il ne constitue ni un diagnostic, ni un Profil PCM officiel, ni une détermination automatisée de Base ou de Phase. Toute conclusion professionnelle doit être contextualisée par un entretien conduit par un formateur qualifié.</p><span>Milliminds · Repères Communication · Réf. {detail.id.slice(0, 8).toUpperCase()}</span></footer>
+        <footer className="report-footer"><p><strong>Note méthodologique.</strong> Ce document restitue un inventaire pédagogique original de préférences déclarées. Il ne constitue ni un diagnostic, ni un Profil PCM officiel, ni une détermination automatisée de Base ou de Phase. Toute conclusion professionnelle doit être contextualisée par un entretien conduit par un formateur qualifié.</p><span>Milliminds · Formation Communication · Réf. {detail.id.slice(0, 8).toUpperCase()}</span></footer>
       </article>
     </main>
   );
@@ -119,7 +119,7 @@ function ReportHeader({ detail }: { detail: AssessmentDetail }) {
   return (
     <header className="report-head">
       <div className="report-head__brand"><Brand/><span>Rapport confidentiel</span></div>
-      <div className="report-head__title"><span>INVENTAIRE DE PRÉFÉRENCES</span><h1>Repères<br/>Communication</h1><p>Support d’analyse et de restitution individuelle</p></div>
+      <div className="report-head__title"><span>INVENTAIRE DE PRÉFÉRENCES</span><h1>Formation<br/>Communication</h1><p>Support d’analyse et de restitution individuelle</p></div>
       <div className="report-identity"><div><small>PARTICIPANT</small><strong>{detail.firstName} {detail.lastName}</strong><span>{detail.organization || "Organisation non renseignée"}</span></div><div><small>SESSION</small><strong>{detail.sessionName}</strong><span>Passation du {formatDate(detail.submittedAt)}</span></div><StatusBadge status={detail.status}/></div>
     </header>
   );
