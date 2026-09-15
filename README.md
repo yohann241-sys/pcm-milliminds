@@ -1,6 +1,16 @@
 # Milliminds — Inventaire de personnalité PCM
 
-Version 1.2.1. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle structure les résultats autour de la Structure de Personnalité, de la Base, de la Phase actuelle, des Perceptions, des Canaux de Communication et des Besoins Psychologiques.
+Version 1.2.3. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle structure les résultats autour de la Structure de Personnalité, de la Base, de la Phase actuelle, des Perceptions, des Canaux de Communication et des Besoins Psychologiques.
+
+
+## Nouveautés v1.2.3 — rôles et tableaux de bord
+
+- **Administrateur / superadmin** : visibilité sur l’ensemble des inventaires et des sessions.
+- **Formateur** : tableau de bord personnel limité aux inventaires rattachés aux sessions qu’il a créées.
+- Chaque nouvelle session est automatiquement rattachée à l’adresse e-mail Netlify Identity du formateur qui la crée.
+- L’export CSV respecte le même périmètre : global pour l’administrateur, personnel pour le formateur.
+- L’administrateur peut supprimer définitivement un inventaire depuis la liste des résultats ; les réponses et la restitution associées sont supprimées en cascade, et l’action est tracée dans le journal d’audit.
+- Les accès directs à un rapport sont également contrôlés côté serveur : un formateur ne peut pas ouvrir le rapport d’une session qui ne lui appartient pas.
 
 ## Correction v1.2.1 — ordre des Étages
 
@@ -60,7 +70,7 @@ Les migrations se trouvent dans `netlify/database/migrations/` et créent :
 
 - `assessment_versions` : versions de l’inventaire ;
 - `dimensions` : référentiel des six Types de Personnalité ;
-- `seminar_sessions` : sessions de séminaire ;
+- `seminar_sessions` : sessions de séminaire, avec rattachement au formateur propriétaire ;
 - `questionnaire_items` : 72 affirmations et clés de cotation ;
 - `participants` : identité minimale et consentement ;
 - `assessments` : passations, statuts, scores et qualité ;
@@ -119,7 +129,7 @@ Variable facultative recommandee :
 ### 4. Controle apres deploiement
 
 - ouvrir `/api/health` : la reponse doit contenir `"ok": true` ;
-- ouvrir `/admin` et verifier **Version 1.2.1** ;
+- ouvrir `/admin` et verifier **Version 1.2.3** ;
 - se connecter avec un utilisateur Netlify Identity ayant le role `admin`, `superadmin` ou `formateur` ;
 - verifier que le tableau de bord se charge sans appel a `/api/admin/login` ;
 - tester **Mot de passe oublie ?** puis l ecran de definition du nouveau mot de passe.

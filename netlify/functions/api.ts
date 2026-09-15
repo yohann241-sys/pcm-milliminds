@@ -53,13 +53,37 @@ const routePath = (request: Request) => {
     .replace(/^\/api/, "") || "/";
 };
 
-async function requireAdmin() {
+type AccessContext = {
+  email: string;
+  roles: string[];
+  isAdmin: boolean;
+  isTrainer: boolean;
+};
+
+async function requireAdmin(): Promise<AccessContext> {
   const user = await getIdentityUser();
   if (!user?.email) throw new HttpError(401, "Connexion Netlify Identity requise.");
   const roles = new Set([...(user.roles ?? []), ...(user.role ? [user.role] : [])].map((role) => String(role).toLowerCase()));
-  const allowed = ["admin", "superadmin", "formateur"].some((role) => roles.has(role));
-  if (!allowed) throw new HttpError(403, "Compte reconnu, mais rôle admin, superadmin ou formateur absent.");
-  return { email: user.email.trim().toLowerCase(), roles: [...roles] };
+  const isAdmin = roles.has("admin") || roles.has("superadmin");
+  const isTrainer = roles.has("formateur");
+  if (!isAdmin && !isTrainer) throw new HttpError(403, "Compte reconnu, mais rôle admin, superadmin ou formateur absent.");
+  return { email: user.email.trim().toLowerCase(), roles: [...roles], isAdmin, isTrainer };
+}
+
+function requireGlobalAdmin(access: AccessContext) {
+  if (!access.isAdmin) throw new HttpError(403, "Cette action est réservée aux administrateurs.");
+}
+
+async function assertAssessmentAccess(assessmentId: string, access: AccessContext) {
+  const rows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`SELECT a.id FROM assessments a WHERE a.id = ${assessmentId}`
+    : await db.sql<Record<string, unknown>>`
+        SELECT a.id
+        FROM assessments a
+        JOIN seminar_sessions s ON s.id = a.seminar_session_id
+        WHERE a.id = ${assessmentId} AND LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+      `;
+  if (!rows[0]) throw new HttpError(404, "Résultat introuvable ou non attribué à votre compte formateur.");
 }
 
 function bearerToken(request: Request) {
@@ -296,38 +320,84 @@ async function submitAssessment(request: Request, assessmentId: string) {
 }
 
 async function dashboard(request: Request) {
-  await requireAdmin();
-  const [summaryRows, recentRows, dimensionRows, sessionRows] = await Promise.all([
-    db.sql<Record<string, unknown>>`
-      SELECT COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE status = 'submitted')::int AS pending,
-        COUNT(*) FILTER (WHERE status = 'reviewed')::int AS reviewed,
-        COUNT(*) FILTER (WHERE status = 'delivered')::int AS delivered,
-        ROUND(AVG(quality_score), 1) AS avg_quality
-      FROM assessments
-    `,
-    db.sql<Record<string, unknown>>`
-      SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
-             a.status, a.submitted_at, a.quality_score, a.score_json
-      FROM assessments a
-      JOIN participants p ON p.id = a.participant_id
-      JOIN seminar_sessions s ON s.id = a.seminar_session_id
-      ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
-      LIMIT 8
-    `,
-    db.sql<Record<string, unknown>>`SELECT * FROM dimensions ORDER BY CASE code WHEN 'ANA' THEN 1 WHEN 'CON' THEN 2 WHEN 'REL' THEN 3 WHEN 'REF' THEN 4 WHEN 'CRE' THEN 5 WHEN 'ACT' THEN 6 END`,
-    db.sql<Record<string, unknown>>`
-      SELECT s.id, s.name, s.organization, s.active, s.created_at, av.version,
-             COUNT(a.id)::int AS participant_count
-      FROM seminar_sessions s
-      JOIN assessment_versions av ON av.id = s.assessment_version_id
-      LEFT JOIN assessments a ON a.seminar_session_id = s.id
-      GROUP BY s.id, s.name, s.organization, s.active, s.created_at, av.version
-      ORDER BY s.created_at DESC
-    `,
-  ]);
+  const access = await requireAdmin();
+
+  const summaryRows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`
+        SELECT COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE status = 'submitted')::int AS pending,
+          COUNT(*) FILTER (WHERE status = 'reviewed')::int AS reviewed,
+          COUNT(*) FILTER (WHERE status = 'delivered')::int AS delivered,
+          ROUND(AVG(quality_score), 1) AS avg_quality
+        FROM assessments
+      `
+    : await db.sql<Record<string, unknown>>`
+        SELECT COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE a.status = 'submitted')::int AS pending,
+          COUNT(*) FILTER (WHERE a.status = 'reviewed')::int AS reviewed,
+          COUNT(*) FILTER (WHERE a.status = 'delivered')::int AS delivered,
+          ROUND(AVG(a.quality_score), 1) AS avg_quality
+        FROM assessments a
+        JOIN seminar_sessions s ON s.id = a.seminar_session_id
+        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+      `;
+
+  const recentRows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`
+        SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
+               a.status, a.submitted_at, a.quality_score, a.score_json
+        FROM assessments a
+        JOIN participants p ON p.id = a.participant_id
+        JOIN seminar_sessions s ON s.id = a.seminar_session_id
+        ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
+        LIMIT 8
+      `
+    : await db.sql<Record<string, unknown>>`
+        SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
+               a.status, a.submitted_at, a.quality_score, a.score_json
+        FROM assessments a
+        JOIN participants p ON p.id = a.participant_id
+        JOIN seminar_sessions s ON s.id = a.seminar_session_id
+        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+        ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
+        LIMIT 8
+      `;
+
+  const dimensionRows = await db.sql<Record<string, unknown>>`
+    SELECT * FROM dimensions
+    ORDER BY CASE code WHEN 'ANA' THEN 1 WHEN 'CON' THEN 2 WHEN 'REL' THEN 3 WHEN 'REF' THEN 4 WHEN 'CRE' THEN 5 WHEN 'ACT' THEN 6 END
+  `;
+
+  const sessionRows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`
+        SELECT s.id, s.name, s.organization, s.active, s.created_at, s.owner_email, av.version,
+               COUNT(a.id)::int AS participant_count
+        FROM seminar_sessions s
+        JOIN assessment_versions av ON av.id = s.assessment_version_id
+        LEFT JOIN assessments a ON a.seminar_session_id = s.id
+        GROUP BY s.id, s.name, s.organization, s.active, s.created_at, s.owner_email, av.version
+        ORDER BY s.created_at DESC
+      `
+    : await db.sql<Record<string, unknown>>`
+        SELECT s.id, s.name, s.organization, s.active, s.created_at, s.owner_email, av.version,
+               COUNT(a.id)::int AS participant_count
+        FROM seminar_sessions s
+        JOIN assessment_versions av ON av.id = s.assessment_version_id
+        LEFT JOIN assessments a ON a.seminar_session_id = s.id
+        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+        GROUP BY s.id, s.name, s.organization, s.active, s.created_at, s.owner_email, av.version
+        ORDER BY s.created_at DESC
+      `;
+
   const summary = summaryRows[0] ?? {};
   return json({
+    viewer: {
+      email: access.email,
+      roles: access.roles,
+      isAdmin: access.isAdmin,
+      isTrainer: access.isTrainer,
+      scope: access.isAdmin ? "global" : "personal",
+    },
     summary: {
       total: Number(summary.total ?? 0),
       pending: Number(summary.pending ?? 0),
@@ -345,6 +415,7 @@ async function dashboard(request: Request) {
       version: String(row.version),
       participantCount: Number(row.participant_count),
       createdAt: String(row.created_at),
+      ownerEmail: row.owner_email ? String(row.owner_email) : null,
     })),
   });
 }
@@ -374,28 +445,43 @@ function mapAssessmentListRow(row: Record<string, unknown>) {
 }
 
 async function listAssessments(request: Request) {
-  await requireAdmin();
+  const access = await requireAdmin();
   const url = new URL(request.url);
   const search = clean(url.searchParams.get("search"), 80);
   const status = clean(url.searchParams.get("status"), 20);
   const like = `%${search}%`;
-  const rows = await db.sql<Record<string, unknown>>`
-    SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
-           a.status, a.submitted_at, a.quality_score, a.score_json
-    FROM assessments a
-    JOIN participants p ON p.id = a.participant_id
-    JOIN seminar_sessions s ON s.id = a.seminar_session_id
-    WHERE (${search} = '' OR p.first_name ILIKE ${like} OR p.last_name ILIKE ${like}
-           OR COALESCE(p.organization, '') ILIKE ${like})
-      AND (${status} = '' OR a.status = ${status})
-    ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
-    LIMIT 500
-  `;
+  const rows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`
+        SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
+               a.status, a.submitted_at, a.quality_score, a.score_json
+        FROM assessments a
+        JOIN participants p ON p.id = a.participant_id
+        JOIN seminar_sessions s ON s.id = a.seminar_session_id
+        WHERE (${search} = '' OR p.first_name ILIKE ${like} OR p.last_name ILIKE ${like}
+               OR COALESCE(p.organization, '') ILIKE ${like})
+          AND (${status} = '' OR a.status = ${status})
+        ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
+        LIMIT 500
+      `
+    : await db.sql<Record<string, unknown>>`
+        SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
+               a.status, a.submitted_at, a.quality_score, a.score_json
+        FROM assessments a
+        JOIN participants p ON p.id = a.participant_id
+        JOIN seminar_sessions s ON s.id = a.seminar_session_id
+        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+          AND (${search} = '' OR p.first_name ILIKE ${like} OR p.last_name ILIKE ${like}
+               OR COALESCE(p.organization, '') ILIKE ${like})
+          AND (${status} = '' OR a.status = ${status})
+        ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
+        LIMIT 500
+      `;
   return json({ assessments: rows.map(mapAssessmentListRow) });
 }
 
 async function assessmentDetail(request: Request, assessmentId: string) {
-  await requireAdmin();
+  const access = await requireAdmin();
+  await assertAssessmentAccess(assessmentId, access);
   const [rows, answerRows, dimensionRows] = await Promise.all([
     db.sql<Record<string, unknown>>`
       SELECT a.id, a.status, a.created_at, a.submitted_at, a.quality_score, a.score_json,
@@ -442,6 +528,7 @@ async function assessmentDetail(request: Request, assessmentId: string) {
 async function updateInterpretation(request: Request, assessmentId: string) {
   assertMutationOrigin(request);
   const admin = await requireAdmin();
+  await assertAssessmentAccess(assessmentId, admin);
   const body = await parseBody(request);
   const synthesis = clean(body.synthesis, 5000);
   const observations = clean(body.observations, 5000);
@@ -479,6 +566,7 @@ async function updateInterpretation(request: Request, assessmentId: string) {
 async function updateStatus(request: Request, assessmentId: string) {
   assertMutationOrigin(request);
   const admin = await requireAdmin();
+  await assertAssessmentAccess(assessmentId, admin);
   const body = await parseBody(request);
   const status = clean(body.status, 20) as AssessmentStatus;
   if (!["submitted", "reviewed", "delivered"].includes(status)) throw new HttpError(400, "Statut invalide.");
@@ -495,8 +583,8 @@ async function createSession(request: Request) {
   const organization = clean(body.organization, 160) || "Milliminds";
   if (name.length < 3) throw new HttpError(400, "Le nom de la session est obligatoire.");
   const rows = await db.sql<Record<string, unknown>>`
-    INSERT INTO seminar_sessions (name, organization, assessment_version_id)
-    SELECT ${name}, ${organization}, id FROM assessment_versions WHERE active = TRUE
+    INSERT INTO seminar_sessions (name, organization, assessment_version_id, owner_email)
+    SELECT ${name}, ${organization}, id, ${admin.email} FROM assessment_versions WHERE active = TRUE
     ORDER BY created_at DESC LIMIT 1
     RETURNING id
   `;
@@ -507,12 +595,24 @@ async function createSession(request: Request) {
 
 async function activateSession(request: Request, sessionId: string) {
   assertMutationOrigin(request);
-  const admin = await requireAdmin();
+  const access = await requireAdmin();
+  const sessionRows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`SELECT id, owner_email FROM seminar_sessions WHERE id = ${sessionId}`
+    : await db.sql<Record<string, unknown>>`
+        SELECT id, owner_email FROM seminar_sessions
+        WHERE id = ${sessionId}
+          AND (owner_email IS NULL OR LOWER(owner_email) = ${access.email})
+      `;
+  if (!sessionRows[0]) throw new HttpError(404, "Session introuvable ou non attribuée à votre compte formateur.");
+
   const client = await db.pool.connect();
   try {
     await client.query("BEGIN");
     await client.query("UPDATE seminar_sessions SET active = FALSE WHERE active = TRUE");
-    const result = await client.query("UPDATE seminar_sessions SET active = TRUE WHERE id = $1 RETURNING id", [sessionId]);
+    const result = await client.query(
+      "UPDATE seminar_sessions SET active = TRUE, owner_email = COALESCE(owner_email, $2) WHERE id = $1 RETURNING id",
+      [sessionId, access.email],
+    );
     if (!result.rows[0]) throw new HttpError(404, "Session introuvable.");
     await client.query("COMMIT");
   } catch (error) {
@@ -521,22 +621,32 @@ async function activateSession(request: Request, sessionId: string) {
   } finally {
     client.release();
   }
-  await audit(admin.email, "session_activated", "seminar_session", sessionId);
+  await audit(access.email, "session_activated", "seminar_session", sessionId);
   return json({ activated: true });
 }
 
 const csvCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 
 async function exportCsv(request: Request) {
-  await requireAdmin();
-  const rows = await db.sql<Record<string, unknown>>`
-    SELECT a.id, p.last_name, p.first_name, p.organization, s.name AS session_name,
-           a.status, a.submitted_at, a.quality_score, a.score_json
-    FROM assessments a
-    JOIN participants p ON p.id = a.participant_id
-    JOIN seminar_sessions s ON s.id = a.seminar_session_id
-    ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
-  `;
+  const access = await requireAdmin();
+  const rows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`
+        SELECT a.id, p.last_name, p.first_name, p.organization, s.name AS session_name,
+               a.status, a.submitted_at, a.quality_score, a.score_json
+        FROM assessments a
+        JOIN participants p ON p.id = a.participant_id
+        JOIN seminar_sessions s ON s.id = a.seminar_session_id
+        ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
+      `
+    : await db.sql<Record<string, unknown>>`
+        SELECT a.id, p.last_name, p.first_name, p.organization, s.name AS session_name,
+               a.status, a.submitted_at, a.quality_score, a.score_json
+        FROM assessments a
+        JOIN participants p ON p.id = a.participant_id
+        JOIN seminar_sessions s ON s.id = a.seminar_session_id
+        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+        ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
+      `;
   const headers = [
     "Référence", "Nom", "Prénom", "Organisation", "Session", "Statut", "Soumis le",
     "Qualité", "Analyse", "Conviction", "Relation", "Réflexion", "Créativité", "Action",
@@ -554,10 +664,49 @@ async function exportCsv(request: Request) {
   return new Response(`\uFEFF${headers.map(csvCell).join(";")}\n${lines.join("\n")}`, {
     headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="resultats-reperes-communication-${new Date().toISOString().slice(0, 10)}.csv"`,
+      "content-disposition": `attachment; filename="resultats-pcm-${new Date().toISOString().slice(0, 10)}.csv"`,
       "cache-control": "no-store",
     },
   });
+}
+
+async function deleteAssessment(request: Request, assessmentId: string) {
+  assertMutationOrigin(request);
+  const access = await requireAdmin();
+  requireGlobalAdmin(access);
+
+  const rows = await db.sql<Record<string, unknown>>`
+    SELECT a.id, a.participant_id, p.first_name, p.last_name, s.name AS session_name
+    FROM assessments a
+    JOIN participants p ON p.id = a.participant_id
+    JOIN seminar_sessions s ON s.id = a.seminar_session_id
+    WHERE a.id = ${assessmentId}
+  `;
+  const row = rows[0];
+  if (!row) throw new HttpError(404, "Inventaire introuvable.");
+
+  await audit(access.email, "assessment_deleted", "assessment", assessmentId, {
+    participant: `${String(row.first_name)} ${String(row.last_name)}`,
+    session: String(row.session_name),
+  });
+
+  const participantId = String(row.participant_id);
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM assessments WHERE id = $1", [assessmentId]);
+    await client.query(
+      "DELETE FROM participants p WHERE p.id = $1 AND NOT EXISTS (SELECT 1 FROM assessments a WHERE a.participant_id = p.id)",
+      [participantId],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return json({ deleted: true });
 }
 
 export default async (request: Request, _context: Context) => {
@@ -587,6 +736,7 @@ export default async (request: Request, _context: Context) => {
     if (method === "PUT" && activateMatch) return activateSession(request, activateMatch[1]);
     const detailMatch = path.match(/^\/admin\/assessments\/([0-9a-f-]{36})$/i);
     if (method === "GET" && detailMatch) return assessmentDetail(request, detailMatch[1]);
+    if (method === "DELETE" && detailMatch) return deleteAssessment(request, detailMatch[1]);
     const interpretationMatch = path.match(/^\/admin\/assessments\/([0-9a-f-]{36})\/interpretation$/i);
     if (method === "PUT" && interpretationMatch) return updateInterpretation(request, interpretationMatch[1]);
     const statusMatch = path.match(/^\/admin\/assessments\/([0-9a-f-]{36})\/status$/i);

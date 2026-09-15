@@ -51,15 +51,15 @@ export default function ReportPage({ assessmentId }: { assessmentId: string }) {
   const baseRef = PCM_REFERENCE[baseCode];
   const phaseRef = PCM_REFERENCE[phaseCode];
 
-  // La Structure PCM est affichée comme un immeuble :
-  // - la Base validée est TOUJOURS l'Étage 1, au niveau le plus bas ;
-  // - les cinq autres Types occupent les Étages 2 à 6 en conservant
-  //   leur ordre relatif issu des scores de Structure ;
-  // - si la Phase est différente de la Base, elle se trouve donc
-  //   nécessairement sur un étage supérieur.
+  // Cartographie pédagogique de restitution :
+  // - la Base validée reste TOUJOURS à l'Étage 1 ;
+  // - les Étages 2 à 6 représentent ensuite la dynamique des Phases,
+  //   classée du score dynamique le plus fort au plus faible ;
+  // - la Phase actuelle est donc toujours visualisée au-dessus de la Base.
   const baseScore = detail.scores.dimensions.find((score) => score.code === baseCode) ?? ordered[0];
-  const otherFloors = ordered.filter((score) => score.code !== baseCode);
-  const bottomToTop = [baseScore, ...otherFloors];
+  const dynamicOrdered = [...detail.scores.dimensions].sort((a, b) => b.dynamique - a.dynamique);
+  const phaseFloors = dynamicOrdered.filter((score) => score.code !== baseCode);
+  const bottomToTop = [baseScore, ...phaseFloors];
   const floorOrder = [...bottomToTop].reverse();
 
   return (
@@ -100,12 +100,13 @@ export default function ReportPage({ assessmentId }: { assessmentId: string }) {
               {floorOrder.map((score, index) => {
                 const d = byCode[score.code];
                 const isBase = score.code === baseCode;
-                const isPhase = score.code === phaseCode;
+                const isPhase = score.code === phaseCode && score.code !== baseCode;
                 const floorNumber = floorOrder.length - index;
+                const displayedScore = isBase ? score.structure : score.dynamique;
                 return <div className={`pcm-floor ${isBase ? "is-base" : ""} ${isPhase ? "is-phase" : ""}`} key={score.code} style={{ "--dimension": d.color } as React.CSSProperties}>
                   <span className="pcm-floor-number">ÉTAGE {floorNumber}</span>
                   <strong>{d.shortName}</strong>
-                  <em>{Math.round(score.structure)}%</em>
+                  <em>{Math.round(displayedScore)}%</em>
                   <span className="pcm-floor-markers">
                     {isBase && <b className="pcm-marker-base">BASE</b>}
                     {isPhase && <b className="pcm-marker-phase">PHASE ACTUELLE</b>}
@@ -116,9 +117,10 @@ export default function ReportPage({ assessmentId }: { assessmentId: string }) {
             </div>
             <div className="pcm-structure-copy">
               <h3>Lecture de la structure</h3>
-              <p>Chaque personne possède les six Types de Personnalité dans un ordre qui lui est propre. La <strong>Base est toujours positionnée à l’Étage 1</strong>, au bas de la structure. Elle reste la référence privilégiée pour la connexion : <strong>Perception + Canal de Communication</strong>.</p>
-              <p>Les cinq autres Types occupent les Étages 2 à 6 au-dessus de la Base. La <strong>Phase actuelle</strong> est signalée sur l’Étage correspondant au Type concerné. Si la Phase est identique à la Base, les deux repères apparaissent ensemble à l’Étage 1.</p>
-              <div className="pcm-legend"><span><i className="legend-base"/> Base</span><span><i className="legend-phase"/> Phase actuelle</span></div>
+              <p>Chaque personne possède les six Types de Personnalité. Dans cette restitution, <strong>la Base reste toujours fixée à l’Étage 1</strong>, car elle constitue le socle stable de la Structure de Personnalité et la porte d’entrée privilégiée pour la relation : <strong>Perception + Canal de Communication</strong>.</p>
+              <p>Les <strong>Étages 2 à 6 visualisent ensuite la dynamique des Phases</strong>, c’est-à-dire les Types les plus mobilisés au moment de la passation, du plus saillant au moins saillant. La <strong>Phase actuelle</strong> est donc marquée sur l’étage dynamique correspondant, au-dessus de la Base.</p>
+              {phaseCode === baseCode && <div className="pcm-phase-note"><strong>Lecture importante :</strong> la Base validée et la Phase actuelle validée correspondent ici au même Type. Pour conserver une cartographie lisible, l’Étage 1 reste réservé à la Base et la dynamique de Phase est représentée sur les étages supérieurs.</div>}
+              <div className="pcm-legend"><span><i className="legend-base"/> Base</span><span><i className="legend-phase"/> Phase actuelle</span><span><i className="legend-dynamic"/> Étages de Phase</span></div>
             </div>
           </div>
         </section>
@@ -146,7 +148,7 @@ export default function ReportPage({ assessmentId }: { assessmentId: string }) {
 
         <section className="report-section">
           <SectionTitle number="04" kicker="SIX TYPES DE PERSONNALITÉ" title="Cartographie de la Structure" />
-          <div className="charts-grid"><div className="chart-card"><h3>Vue d’ensemble</h3><RadarChart scores={detail.scores.dimensions} dimensions={detail.dimensions}/></div><div className="chart-card"><h3>Ordre relatif des Étages</h3><ScoreBars scores={detail.scores.dimensions} dimensions={detail.dimensions} field="structure" /></div></div>
+          <div className="charts-grid"><div className="chart-card"><h3>Vue d’ensemble Structure / Phase</h3><p>Comparaison entre le socle de Base et la dynamique actuelle des Phases.</p><RadarChart scores={detail.scores.dimensions} dimensions={detail.dimensions}/></div><div className="chart-card"><h3>Hiérarchie des Étages</h3><p>Base en Étage 1, puis dynamique de Phase sur les étages supérieurs.</p><ScoreBars scores={bottomToTop.map((score, index) => ({ ...score, structure: index === 0 ? score.structure : score.dynamique }))} dimensions={detail.dimensions} field="structure" preserveOrder /></div></div>
           <div className="pcm-type-grid">{detail.dimensions.map(d => { const ref=PCM_REFERENCE[d.code]; return <article key={d.code} style={{ "--dimension": d.color } as React.CSSProperties}><h3>{ref.typeName}</h3><p><b>Perception :</b> {ref.perception}</p><p><b>Canal :</b> {ref.channelName}</p><p><b>Points Forts :</b> {ref.strengths.join(" · ")}</p><p><b>Besoins Psychologiques :</b> {ref.psychologicalNeeds.join(" · ")}</p></article>; })}</div>
         </section>
 

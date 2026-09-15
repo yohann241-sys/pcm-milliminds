@@ -21,16 +21,24 @@ function hasAdminRole(roles: string[] | undefined, primaryRole?: string) {
   const normalized = new Set([...(roles ?? []), ...(primaryRole ? [primaryRole] : [])].map((role) => String(role).toLowerCase()));
   return ["admin", "superadmin", "formateur"].some((role) => normalized.has(role));
 }
+
+function hasGlobalAdminRole(roles: string[] | undefined, primaryRole?: string) {
+  const normalized = new Set([...(roles ?? []), ...(primaryRole ? [primaryRole] : [])].map((role) => String(role).toLowerCase()));
+  return normalized.has("admin") || normalized.has("superadmin");
+}
+
 type DashboardData = {
+  viewer: { email: string; roles: string[]; isAdmin: boolean; isTrainer: boolean; scope: "global" | "personal" };
   summary: { total: number; pending: number; reviewed: number; delivered: number; avgQuality: number };
   recent: AssessmentListItem[];
   dimensions: DimensionDefinition[];
-  sessions: Array<{ id: string; name: string; organization: string; active: boolean; version: string; participantCount: number; createdAt: string }>;
+  sessions: Array<{ id: string; name: string; organization: string; active: boolean; version: string; participantCount: number; createdAt: string; ownerEmail: string | null }>;
 };
 
 export default function AdminPage() {
   const [auth, setAuth] = useState<"loading" | "in" | "out">("loading");
   const [email, setEmail] = useState("");
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false);
 
   useEffect(() => {
     getIdentityUser()
@@ -40,6 +48,7 @@ export default function AdminPage() {
           return;
         }
         setEmail(user.email);
+        setIsGlobalAdmin(hasGlobalAdminRole(user.roles, user.role));
         setAuth("in");
       })
       .catch(() => setAuth("out"));
@@ -47,7 +56,7 @@ export default function AdminPage() {
 
   if (auth === "loading") return <div className="admin-loading"><Spinner label="Vérification de l’accès" /></div>;
   if (auth === "out") return <AdminLogin />;
-  return <AdminWorkspace email={email} />;
+  return <AdminWorkspace email={email} initialIsAdmin={isGlobalAdmin} />;
 }
 
 function AdminLogin() {
@@ -176,14 +185,14 @@ function AdminLogin() {
             </>
           )}
           <small className="security-copy"><Icon name="shield" size={15}/> Authentification sécurisée par Netlify Identity</small>
-          <small className="build-version">Version 1.2.1</small>
+          <small className="build-version">Version 1.2.3</small>
         </form>
       </section>
     </main>
   );
 }
 
-function AdminWorkspace({ email }: { email: string }) {
+function AdminWorkspace({ email, initialIsAdmin }: { email: string; initialIsAdmin: boolean }) {
   const [tab, setTab] = useState<AdminTab>("overview");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [assessments, setAssessments] = useState<AssessmentListItem[]>([]);
@@ -192,6 +201,7 @@ function AdminWorkspace({ email }: { email: string }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const isAdmin = dashboard?.viewer.isAdmin ?? initialIsAdmin;
 
   const load = async () => {
     setLoading(true);
@@ -217,15 +227,28 @@ function AdminWorkspace({ email }: { email: string }) {
     window.location.href = "/admin";
   };
 
+  const deleteInventory = async (item: AssessmentListItem) => {
+    if (!isAdmin) return;
+    const confirmed = window.confirm(`Supprimer définitivement l’inventaire de ${item.firstName} ${item.lastName} ?\n\nCette action efface les réponses, l’analyse et le rapport associés.`);
+    if (!confirmed) return;
+    setError("");
+    try {
+      await api(`/admin/assessments/${item.id}`, { method: "DELETE" });
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Suppression impossible.");
+    }
+  };
+
   const filtered = useMemo(() => assessments.filter((item) => {
     const haystack = `${item.firstName} ${item.lastName} ${item.organization ?? ""} ${item.sessionName}`.toLowerCase();
     return (!search || haystack.includes(search.toLowerCase())) && (!status || item.status === status);
   }), [assessments, search, status]);
 
   const items: Array<{ id: AdminTab; label: string; icon: string }> = [
-    { id: "overview", label: "Vue d’ensemble", icon: "chart" },
-    { id: "results", label: "Inventaires", icon: "users" },
-    { id: "sessions", label: "Séminaires", icon: "file" },
+    { id: "overview", label: isAdmin ? "Vue d’ensemble" : "Mon tableau de bord", icon: "chart" },
+    { id: "results", label: isAdmin ? "Tous les inventaires" : "Mes inventaires", icon: "users" },
+    { id: "sessions", label: isAdmin ? "Séminaires" : "Mes séminaires", icon: "file" },
     { id: "method", label: "Référentiel", icon: "settings" },
   ];
 
@@ -237,7 +260,7 @@ function AdminWorkspace({ email }: { email: string }) {
           <small>PILOTAGE</small>
           {items.map((item) => <button key={item.id} className={tab === item.id ? "is-active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon name={item.icon}/>{item.label}</button>)}
         </nav>
-        <div className="sidebar-user"><span>{email.slice(0, 1).toUpperCase()}</span><div><strong>Administrateur</strong><small>{email}</small></div></div>
+        <div className="sidebar-user"><span>{email.slice(0, 1).toUpperCase()}</span><div><strong>{isAdmin ? "Administrateur" : "Formateur"}</strong><small>{email}</small></div></div>
         <button className="sidebar-logout" onClick={logout}><Icon name="logout"/> Déconnexion</button>
       </aside>
       <main className="admin-main">
@@ -250,7 +273,7 @@ function AdminWorkspace({ email }: { email: string }) {
           {loading && <Spinner label="Chargement des données" />}
           {error && <Notice type="error">{error}</Notice>}
           {!loading && dashboard && tab === "overview" && <Overview dashboard={dashboard} openResults={() => setTab("results")} />}
-          {!loading && dashboard && tab === "results" && <ResultsList assessments={filtered} search={search} setSearch={setSearch} status={status} setStatus={setStatus} />}
+          {!loading && dashboard && tab === "results" && <ResultsList assessments={filtered} search={search} setSearch={setSearch} status={status} setStatus={setStatus} isAdmin={isAdmin} onDelete={deleteInventory} />}
           {!loading && dashboard && tab === "sessions" && <Sessions sessions={dashboard.sessions} onChanged={load} />}
           {!loading && dashboard && tab === "method" && <Methodology dimensions={dashboard.dimensions} />}
         </div>
@@ -261,14 +284,14 @@ function AdminWorkspace({ email }: { email: string }) {
 
 function Overview({ dashboard, openResults }: { dashboard: DashboardData; openResults: () => void }) {
   const cards = [
-    { label: "Inventaires", value: dashboard.summary.total, detail: "Toutes sessions", tone: "blue", icon: "users" },
+    { label: dashboard.viewer.isAdmin ? "Inventaires" : "Mes inventaires", value: dashboard.summary.total, detail: dashboard.viewer.isAdmin ? "Toutes sessions" : "Mes sessions", tone: "blue", icon: "users" },
     { label: "À analyser", value: dashboard.summary.pending, detail: "Restitution à préparer", tone: "amber", icon: "file" },
     { label: "Analysés", value: dashboard.summary.reviewed, detail: "Notes formateur saisies", tone: "violet", icon: "chart" },
     { label: "Restitués", value: dashboard.summary.delivered, detail: "Entretiens finalisés", tone: "green", icon: "check" },
   ];
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">TABLEAU DE BORD</span><h1>Bonjour, Monsieur Yohann</h1><p>Suivez les passations et préparez les restitutions individuelles.</p></div><div className="date-chip">{new Intl.DateTimeFormat("fr-FR", { dateStyle: "full" }).format(new Date())}</div></div>
+      <div className="page-heading"><div><span className="eyebrow">{dashboard.viewer.isAdmin ? "TABLEAU DE BORD ADMINISTRATEUR" : "TABLEAU DE BORD FORMATEUR"}</span><h1>{dashboard.viewer.isAdmin ? "Pilotage global des inventaires" : "Mon espace formateur"}</h1><p>{dashboard.viewer.isAdmin ? "Vous voyez l’ensemble des inventaires, des sessions et des restitutions." : "Vous voyez uniquement les inventaires rattachés aux sessions que vous avez créées ou prises en charge."}</p></div><div className="date-chip">{new Intl.DateTimeFormat("fr-FR", { dateStyle: "full" }).format(new Date())}</div></div>
       <section className="metric-grid">
         {cards.map((card) => <article className={`metric-card metric-card--${card.tone}`} key={card.label}><span className="metric-icon"><Icon name={card.icon}/></span><div><small>{card.label}</small><strong>{card.value}</strong><em>{card.detail}</em></div></article>)}
       </section>
@@ -292,23 +315,24 @@ function Overview({ dashboard, openResults }: { dashboard: DashboardData; openRe
   );
 }
 
-function ResultsList({ assessments, search, setSearch, status, setStatus }: { assessments: AssessmentListItem[]; search: string; setSearch: (v: string) => void; status: string; setStatus: (v: string) => void }) {
+function ResultsList({ assessments, search, setSearch, status, setStatus, isAdmin, onDelete }: { assessments: AssessmentListItem[]; search: string; setSearch: (v: string) => void; status: string; setStatus: (v: string) => void; isAdmin: boolean; onDelete: (item: AssessmentListItem) => Promise<void> }) {
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">RÉSULTATS</span><h1>Inventaires des participants</h1><p>Consultez, analysez et préparez chaque entretien.</p></div><a className="button button--soft" href="/api/admin/export"><Icon name="download"/> Exporter CSV</a></div>
+      <div className="page-heading"><div><span className="eyebrow">RÉSULTATS</span><h1>{isAdmin ? "Tous les inventaires" : "Mes inventaires"}</h1><p>{isAdmin ? "Consultez l’ensemble des inventaires et administrez les données." : "Consultez les inventaires rattachés à vos propres sessions de formation."}</p></div><a className="button button--soft" href="/api/admin/export"><Icon name="download"/> Exporter CSV</a></div>
+      {isAdmin && <Notice type="info"><strong>Droit administrateur.</strong> Vous pouvez supprimer définitivement un inventaire. Cette action efface également ses réponses et sa restitution associée.</Notice>}
       <section className="panel">
         <div className="filters"><label className="search-field"><Icon name="search"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un participant…" /></label><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Tous les statuts</option><option value="submitted">À analyser</option><option value="reviewed">Analysé</option><option value="delivered">Restitué</option><option value="draft">En cours</option></select><span className="result-count">{assessments.length} résultat{assessments.length > 1 ? "s" : ""}</span></div>
-        <AssessmentTable assessments={assessments} />
+        <AssessmentTable assessments={assessments} isAdmin={isAdmin} onDelete={onDelete} />
       </section>
     </>
   );
 }
 
-function AssessmentTable({ assessments, compact = false }: { assessments: AssessmentListItem[]; compact?: boolean }) {
+function AssessmentTable({ assessments, compact = false, isAdmin = false, onDelete }: { assessments: AssessmentListItem[]; compact?: boolean; isAdmin?: boolean; onDelete?: (item: AssessmentListItem) => Promise<void> }) {
   if (!assessments.length) return <div className="empty-state"><Icon name="users" size={34}/><h3>Aucune passation</h3><p>Les participants apparaîtront ici dès leur inscription.</p></div>;
   return (
-    <div className="table-wrap"><table className="data-table"><thead><tr><th>Participant</th><th>Session</th><th>Base proposée</th><th>Qualité</th><th>Statut</th><th></th></tr></thead><tbody>
-      {assessments.map((item) => <tr key={item.id}><td><button className="participant-cell" onClick={() => navigate(`/admin/result/${item.id}`)}><span>{item.firstName.slice(0, 1)}{item.lastName.slice(0, 1)}</span><div><strong>{item.firstName} {item.lastName}</strong><small>{item.organization || formatDate(item.submittedAt, true)}</small></div></button></td><td><span className="session-name">{item.sessionName}</span></td><td><div className="dominant-tags">{item.leadingStructure.length ? item.leadingStructure.map((code) => <i key={code}>{code}</i>) : <small>En cours</small>}</div></td><td><QualityBadge value={item.qualityScore}/></td><td><StatusBadge status={item.status}/></td><td><button className="row-arrow" aria-label="Voir le résultat" onClick={() => navigate(`/admin/result/${item.id}`)}><Icon name="arrow"/></button></td></tr>)}
+    <div className="table-wrap"><table className="data-table"><thead><tr><th>Participant</th><th>Session</th><th>Base proposée</th><th>Qualité</th><th>Statut</th><th>Actions</th></tr></thead><tbody>
+      {assessments.map((item) => <tr key={item.id}><td><button className="participant-cell" onClick={() => navigate(`/admin/result/${item.id}`)}><span>{item.firstName.slice(0, 1)}{item.lastName.slice(0, 1)}</span><div><strong>{item.firstName} {item.lastName}</strong><small>{item.organization || formatDate(item.submittedAt, true)}</small></div></button></td><td><span className="session-name">{item.sessionName}</span></td><td><div className="dominant-tags">{item.leadingStructure.length ? item.leadingStructure.map((code) => <i key={code}>{code}</i>) : <small>En cours</small>}</div></td><td><QualityBadge value={item.qualityScore}/></td><td><StatusBadge status={item.status}/></td><td><div className="row-actions"><button className="row-arrow" aria-label="Voir le résultat" onClick={() => navigate(`/admin/result/${item.id}`)}><Icon name="arrow"/></button>{isAdmin && onDelete && <button className="row-delete" aria-label="Supprimer l’inventaire" title="Supprimer définitivement" onClick={() => onDelete(item)}><Icon name="trash" size={17}/></button>}</div></td></tr>)}
     </tbody></table>{compact && assessments.length > 5 ? <small>Affichage limité aux éléments récents.</small> : null}</div>
   );
 }
@@ -346,7 +370,7 @@ function Sessions({ sessions, onChanged }: { sessions: DashboardData["sessions"]
       <div className="page-heading"><div><span className="eyebrow">ORGANISATION</span><h1>Sessions de séminaire</h1><p>Une seule session est ouverte aux participants à la fois.</p></div><button className="button button--primary" onClick={() => setCreating(!creating)}><Icon name="plus"/> Nouvelle session</button></div>
       {message && <Notice type="success">{message}</Notice>}
       {creating && <form className="panel session-form" onSubmit={create}><div><h2>Créer une session</h2><p>Elle sera créée en attente. Vous pourrez ensuite l’activer.</p></div><label className="field"><span>Nom du séminaire</span><input required minLength={3} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. Séminaire Leadership — Octobre 2026"/></label><label className="field"><span>Organisation</span><input required value={organization} onChange={(e) => setOrganization(e.target.value)}/></label><div className="form-actions"><button type="button" className="button button--ghost" onClick={() => setCreating(false)}>Annuler</button><button className="button button--primary">Créer</button></div></form>}
-      <div className="session-list">{sessions.map((session) => <article className={`panel session-item ${session.active ? "is-active" : ""}`} key={session.id}><div className="session-state">{session.active ? <><span className="live-dot"/> Active</> : "En attente"}</div><div className="session-main"><small>VERSION {session.version}</small><h2>{session.name}</h2><p>{session.organization} · créée le {formatDate(session.createdAt)}</p></div><div className="session-count"><strong>{session.participantCount}</strong><small>participant{session.participantCount > 1 ? "s" : ""}</small></div>{!session.active && <button className="button button--soft" onClick={() => activate(session.id)}>Activer</button>}</article>)}</div>
+      <div className="session-list">{sessions.map((session) => <article className={`panel session-item ${session.active ? "is-active" : ""}`} key={session.id}><div className="session-state">{session.active ? <><span className="live-dot"/> Active</> : "En attente"}</div><div className="session-main"><small>VERSION {session.version}</small><h2>{session.name}</h2><p>{session.organization} · créée le {formatDate(session.createdAt)}</p>{session.ownerEmail && <span className="session-owner">Formateur responsable : {session.ownerEmail}</span>}</div><div className="session-count"><strong>{session.participantCount}</strong><small>participant{session.participantCount > 1 ? "s" : ""}</small></div>{!session.active && <button className="button button--soft" onClick={() => activate(session.id)}>Activer</button>}</article>)}</div>
     </>
   );
 }
