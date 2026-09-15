@@ -77,6 +77,7 @@ export interface ParticipantDraft {
   accessToken: string;
   firstName: string;
   lastName: string;
+  trainerEmail: string;
   sessionName: string;
   questions: Question[];
   startedAt: string;
@@ -88,6 +89,7 @@ export interface AssessmentListItem {
   lastName: string;
   organization: string | null;
   sessionName: string;
+  trainerEmail: string | null;
   status: AssessmentStatus;
   submittedAt: string | null;
   qualityScore: number | null;

@@ -11,6 +11,7 @@ beforeAll(async () => {
     "netlify/database/migrations/202609140002_seed_questionnaire.sql",
     "netlify/database/migrations/202609140003_pcm_v12.sql",
     "netlify/database/migrations/202609150001_role_scoping_and_ownership.sql",
+    "netlify/database/migrations/202609150002_trainer_assignment.sql",
   ];
   for (const file of files) {
     const sql = readFileSync(resolve(process.cwd(), file), "utf8")
@@ -34,6 +35,10 @@ describe("migrations Netlify Database", () => {
     expect(sessions.rows[0].active).toBe(true);
     const ownerColumn = await database.query<{ column_name: string }>("SELECT column_name FROM information_schema.columns WHERE table_name='seminar_sessions' AND column_name='owner_email'");
     expect(ownerColumn.rows).toHaveLength(1);
+    const trainerEmailColumn = await database.query<{ column_name: string }>("SELECT column_name FROM information_schema.columns WHERE table_name='assessments' AND column_name='trainer_email'");
+    expect(trainerEmailColumn.rows).toHaveLength(1);
+    const trainerDirectory = await database.query<{ table_name: string }>("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name='trainer_directory'");
+    expect(trainerDirectory.rows).toHaveLength(1);
   });
 
   it("conservent six dimensions et activent la version PCM 1.2", async () => {

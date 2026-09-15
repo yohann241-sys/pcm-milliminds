@@ -4,7 +4,7 @@ import { Brand, Icon, Notice, Spinner } from "../components/Brand";
 import { api, formatDate, navigate } from "../lib/api";
 import type { AssessmentListItem, DimensionDefinition } from "../lib/model";
 
-type AdminTab = "overview" | "results" | "sessions" | "method";
+type AdminTab = "overview" | "results" | "trainers" | "sessions" | "method";
 
 function isRateLimitError(reason: unknown) {
   const status = typeof reason === "object" && reason !== null && "status" in reason
@@ -27,12 +27,27 @@ function hasGlobalAdminRole(roles: string[] | undefined, primaryRole?: string) {
   return normalized.has("admin") || normalized.has("superadmin");
 }
 
+
+type TrainerDirectoryItem = {
+  email: string;
+  displayName: string | null;
+  source: string;
+  isTrainer: boolean;
+  roles: string[];
+  inventoryCount: number;
+  pendingCount: number;
+  reviewedCount: number;
+  deliveredCount: number;
+  lastActivity: string | null;
+};
+
 type DashboardData = {
   viewer: { email: string; roles: string[]; isAdmin: boolean; isTrainer: boolean; scope: "global" | "personal" };
   summary: { total: number; pending: number; reviewed: number; delivered: number; avgQuality: number };
   recent: AssessmentListItem[];
   dimensions: DimensionDefinition[];
   sessions: Array<{ id: string; name: string; organization: string; active: boolean; version: string; participantCount: number; createdAt: string; ownerEmail: string | null }>;
+  trainers: TrainerDirectoryItem[];
 };
 
 export default function AdminPage() {
@@ -185,7 +200,7 @@ function AdminLogin() {
             </>
           )}
           <small className="security-copy"><Icon name="shield" size={15}/> Authentification sécurisée par Netlify Identity</small>
-          <small className="build-version">Version 1.2.3</small>
+          <small className="build-version">Version 1.2.4</small>
         </form>
       </section>
     </main>
@@ -241,13 +256,14 @@ function AdminWorkspace({ email, initialIsAdmin }: { email: string; initialIsAdm
   };
 
   const filtered = useMemo(() => assessments.filter((item) => {
-    const haystack = `${item.firstName} ${item.lastName} ${item.organization ?? ""} ${item.sessionName}`.toLowerCase();
+    const haystack = `${item.firstName} ${item.lastName} ${item.organization ?? ""} ${item.sessionName} ${item.trainerEmail ?? ""}`.toLowerCase();
     return (!search || haystack.includes(search.toLowerCase())) && (!status || item.status === status);
   }), [assessments, search, status]);
 
   const items: Array<{ id: AdminTab; label: string; icon: string }> = [
     { id: "overview", label: isAdmin ? "Vue d’ensemble" : "Mon tableau de bord", icon: "chart" },
     { id: "results", label: isAdmin ? "Tous les inventaires" : "Mes inventaires", icon: "users" },
+    ...(isAdmin ? [{ id: "trainers" as AdminTab, label: "Formateurs", icon: "users" }] : []),
     { id: "sessions", label: isAdmin ? "Séminaires" : "Mes séminaires", icon: "file" },
     { id: "method", label: "Référentiel", icon: "settings" },
   ];
@@ -267,13 +283,14 @@ function AdminWorkspace({ email, initialIsAdmin }: { email: string; initialIsAdm
         <header className="admin-topbar">
           <button className="mobile-menu" aria-label="Ouvrir le menu" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
           <div><span>Milliminds</span><strong>{items.find((item) => item.id === tab)?.label}</strong></div>
-          <a className="button button--soft" href="/" target="_blank" rel="noreferrer">Ouvrir la passation <Icon name="arrow" size={17}/></a>
+          <a className="button button--soft" href={isAdmin ? "/" : `/?formateur=${encodeURIComponent(email)}`} target="_blank" rel="noreferrer">{isAdmin ? "Ouvrir la passation" : "Ma passation personnalisée"} <Icon name="arrow" size={17}/></a>
         </header>
         <div className="admin-content">
           {loading && <Spinner label="Chargement des données" />}
           {error && <Notice type="error">{error}</Notice>}
           {!loading && dashboard && tab === "overview" && <Overview dashboard={dashboard} openResults={() => setTab("results")} />}
           {!loading && dashboard && tab === "results" && <ResultsList assessments={filtered} search={search} setSearch={setSearch} status={status} setStatus={setStatus} isAdmin={isAdmin} onDelete={deleteInventory} />}
+          {!loading && dashboard && isAdmin && tab === "trainers" && <TrainersDirectory trainers={dashboard.trainers} />}
           {!loading && dashboard && tab === "sessions" && <Sessions sessions={dashboard.sessions} onChanged={load} />}
           {!loading && dashboard && tab === "method" && <Methodology dimensions={dashboard.dimensions} />}
         </div>
@@ -291,14 +308,14 @@ function Overview({ dashboard, openResults }: { dashboard: DashboardData; openRe
   ];
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">{dashboard.viewer.isAdmin ? "TABLEAU DE BORD ADMINISTRATEUR" : "TABLEAU DE BORD FORMATEUR"}</span><h1>{dashboard.viewer.isAdmin ? "Pilotage global des inventaires" : "Mon espace formateur"}</h1><p>{dashboard.viewer.isAdmin ? "Vous voyez l’ensemble des inventaires, des sessions et des restitutions." : "Vous voyez uniquement les inventaires rattachés aux sessions que vous avez créées ou prises en charge."}</p></div><div className="date-chip">{new Intl.DateTimeFormat("fr-FR", { dateStyle: "full" }).format(new Date())}</div></div>
+      <div className="page-heading"><div><span className="eyebrow">{dashboard.viewer.isAdmin ? "TABLEAU DE BORD ADMINISTRATEUR" : "TABLEAU DE BORD FORMATEUR"}</span><h1>{dashboard.viewer.isAdmin ? "Pilotage global des inventaires" : "Mon espace formateur"}</h1><p>{dashboard.viewer.isAdmin ? "Vous voyez l’ensemble des inventaires, des formateurs, des sessions et des restitutions." : "Vous voyez uniquement les inventaires pour lesquels les participants ont renseigné votre adresse e-mail de formateur."}</p></div><div className="date-chip">{new Intl.DateTimeFormat("fr-FR", { dateStyle: "full" }).format(new Date())}</div></div>
       <section className="metric-grid">
         {cards.map((card) => <article className={`metric-card metric-card--${card.tone}`} key={card.label}><span className="metric-icon"><Icon name={card.icon}/></span><div><small>{card.label}</small><strong>{card.value}</strong><em>{card.detail}</em></div></article>)}
       </section>
       <section className="overview-grid">
         <article className="panel panel--large">
           <div className="panel-heading"><div><h2>Passations récentes</h2><p>Dernières activités enregistrées</p></div><button className="text-button" onClick={openResults}>Voir tout <Icon name="arrow" size={16}/></button></div>
-          <AssessmentTable assessments={dashboard.recent} compact />
+          <AssessmentTable assessments={dashboard.recent} compact isAdmin={dashboard.viewer.isAdmin} />
         </article>
         <aside className="panel quality-panel">
           <span className="quality-gauge" style={{ "--gauge": `${dashboard.summary.avgQuality * 3.6}deg` } as React.CSSProperties}><strong>{Math.round(dashboard.summary.avgQuality || 0)}</strong><small>/100</small></span>
@@ -309,7 +326,7 @@ function Overview({ dashboard, openResults }: { dashboard: DashboardData; openRe
       </section>
       <section className="panel active-session-panel">
         <div><span className="live-dot"/><small>SESSION PARTICIPANT ACTIVE</small><h2>{dashboard.sessions.find((session) => session.active)?.name ?? "Aucune session active"}</h2><p>{dashboard.sessions.find((session) => session.active)?.organization ?? "Activez une session depuis l’onglet Séminaires."}</p></div>
-        <a className="button button--dark" href="/" target="_blank" rel="noreferrer">Copier le lien de passation <Icon name="arrow"/></a>
+        <a className="button button--dark" href={dashboard.viewer.isAdmin ? "/" : `/?formateur=${encodeURIComponent(dashboard.viewer.email)}`} target="_blank" rel="noreferrer">{dashboard.viewer.isAdmin ? "Ouvrir le lien de passation" : "Ouvrir mon lien prérempli"} <Icon name="arrow"/></a>
       </section>
     </>
   );
@@ -318,7 +335,7 @@ function Overview({ dashboard, openResults }: { dashboard: DashboardData; openRe
 function ResultsList({ assessments, search, setSearch, status, setStatus, isAdmin, onDelete }: { assessments: AssessmentListItem[]; search: string; setSearch: (v: string) => void; status: string; setStatus: (v: string) => void; isAdmin: boolean; onDelete: (item: AssessmentListItem) => Promise<void> }) {
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">RÉSULTATS</span><h1>{isAdmin ? "Tous les inventaires" : "Mes inventaires"}</h1><p>{isAdmin ? "Consultez l’ensemble des inventaires et administrez les données." : "Consultez les inventaires rattachés à vos propres sessions de formation."}</p></div><a className="button button--soft" href="/api/admin/export"><Icon name="download"/> Exporter CSV</a></div>
+      <div className="page-heading"><div><span className="eyebrow">RÉSULTATS</span><h1>{isAdmin ? "Tous les inventaires" : "Mes inventaires"}</h1><p>{isAdmin ? "Consultez l’ensemble des inventaires, leur formateur attribué et administrez les données." : "Consultez les inventaires que les participants ont directement attribués à votre adresse e-mail."}</p></div><a className="button button--soft" href="/api/admin/export"><Icon name="download"/> Exporter CSV</a></div>
       {isAdmin && <Notice type="info"><strong>Droit administrateur.</strong> Vous pouvez supprimer définitivement un inventaire. Cette action efface également ses réponses et sa restitution associée.</Notice>}
       <section className="panel">
         <div className="filters"><label className="search-field"><Icon name="search"/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un participant…" /></label><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Tous les statuts</option><option value="submitted">À analyser</option><option value="reviewed">Analysé</option><option value="delivered">Restitué</option><option value="draft">En cours</option></select><span className="result-count">{assessments.length} résultat{assessments.length > 1 ? "s" : ""}</span></div>
@@ -331,9 +348,27 @@ function ResultsList({ assessments, search, setSearch, status, setStatus, isAdmi
 function AssessmentTable({ assessments, compact = false, isAdmin = false, onDelete }: { assessments: AssessmentListItem[]; compact?: boolean; isAdmin?: boolean; onDelete?: (item: AssessmentListItem) => Promise<void> }) {
   if (!assessments.length) return <div className="empty-state"><Icon name="users" size={34}/><h3>Aucune passation</h3><p>Les participants apparaîtront ici dès leur inscription.</p></div>;
   return (
-    <div className="table-wrap"><table className="data-table"><thead><tr><th>Participant</th><th>Session</th><th>Base proposée</th><th>Qualité</th><th>Statut</th><th>Actions</th></tr></thead><tbody>
-      {assessments.map((item) => <tr key={item.id}><td><button className="participant-cell" onClick={() => navigate(`/admin/result/${item.id}`)}><span>{item.firstName.slice(0, 1)}{item.lastName.slice(0, 1)}</span><div><strong>{item.firstName} {item.lastName}</strong><small>{item.organization || formatDate(item.submittedAt, true)}</small></div></button></td><td><span className="session-name">{item.sessionName}</span></td><td><div className="dominant-tags">{item.leadingStructure.length ? item.leadingStructure.map((code) => <i key={code}>{code}</i>) : <small>En cours</small>}</div></td><td><QualityBadge value={item.qualityScore}/></td><td><StatusBadge status={item.status}/></td><td><div className="row-actions"><button className="row-arrow" aria-label="Voir le résultat" onClick={() => navigate(`/admin/result/${item.id}`)}><Icon name="arrow"/></button>{isAdmin && onDelete && <button className="row-delete" aria-label="Supprimer l’inventaire" title="Supprimer définitivement" onClick={() => onDelete(item)}><Icon name="trash" size={17}/></button>}</div></td></tr>)}
+    <div className="table-wrap"><table className="data-table"><thead><tr><th>Participant</th><th>Session</th>{isAdmin && <th>Formateur attribué</th>}<th>Base proposée</th><th>Qualité</th><th>Statut</th><th>Actions</th></tr></thead><tbody>
+      {assessments.map((item) => <tr key={item.id}><td><button className="participant-cell" onClick={() => navigate(`/admin/result/${item.id}`)}><span>{item.firstName.slice(0, 1)}{item.lastName.slice(0, 1)}</span><div><strong>{item.firstName} {item.lastName}</strong><small>{item.organization || formatDate(item.submittedAt, true)}</small></div></button></td><td><span className="session-name">{item.sessionName}</span></td>{isAdmin && <td><span className="trainer-assignment">{item.trainerEmail || "Non attribué"}</span></td>}<td><div className="dominant-tags">{item.leadingStructure.length ? item.leadingStructure.map((code) => <i key={code}>{code}</i>) : <small>En cours</small>}</div></td><td><QualityBadge value={item.qualityScore}/></td><td><StatusBadge status={item.status}/></td><td><div className="row-actions"><button className="row-arrow" aria-label="Voir le résultat" onClick={() => navigate(`/admin/result/${item.id}`)}><Icon name="arrow"/></button>{isAdmin && onDelete && <button className="row-delete" aria-label="Supprimer l’inventaire" title="Supprimer définitivement" onClick={() => onDelete(item)}><Icon name="trash" size={17}/></button>}</div></td></tr>)}
     </tbody></table>{compact && assessments.length > 5 ? <small>Affichage limité aux éléments récents.</small> : null}</div>
+  );
+}
+
+function TrainersDirectory({ trainers }: { trainers: TrainerDirectoryItem[] }) {
+  const [query, setQuery] = useState("");
+  const filtered = trainers.filter((trainer) => {
+    const haystack = `${trainer.email} ${trainer.displayName ?? ""}`.toLowerCase();
+    return !query || haystack.includes(query.toLowerCase());
+  });
+  return (
+    <>
+      <div className="page-heading"><div><span className="eyebrow">ADMINISTRATION</span><h1>Liste des formateurs</h1><p>Cette liste regroupe les formateurs reconnus dans l’application et les adresses e-mail auxquelles des participants ont attribué un inventaire.</p></div><div className="trainer-total"><strong>{trainers.length}</strong><span>formateur{trainers.length > 1 ? "s" : ""}</span></div></div>
+      <Notice type="info"><strong>Affectation directe.</strong> Lors de l’inscription, le participant saisit l’adresse e-mail de son formateur. L’inventaire apparaît ensuite automatiquement dans le tableau de bord personnel correspondant.</Notice>
+      <section className="panel">
+        <div className="filters"><label className="search-field"><Icon name="search"/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un formateur…" /></label><span className="result-count">{filtered.length} résultat{filtered.length > 1 ? "s" : ""}</span></div>
+        {!filtered.length ? <div className="empty-state"><Icon name="users" size={34}/><h3>Aucun formateur référencé</h3><p>Les adresses apparaîtront ici dès une affectation ou une connexion formateur.</p></div> : <div className="table-wrap"><table className="data-table trainer-table"><thead><tr><th>Formateur</th><th>Statut</th><th>Inventaires</th><th>À analyser</th><th>Analysés</th><th>Restitués</th><th>Dernière activité</th></tr></thead><tbody>{filtered.map((trainer) => <tr key={trainer.email}><td><div className="trainer-cell"><span>{trainer.email.slice(0,1).toUpperCase()}</span><div><strong>{trainer.displayName || trainer.email.split("@")[0]}</strong><small>{trainer.email}</small></div></div></td><td><span className={`trainer-state ${trainer.isTrainer ? "is-confirmed" : "is-referenced"}`}>{trainer.isTrainer ? "Compte formateur reconnu" : "Référencé par affectation"}</span></td><td><strong>{trainer.inventoryCount}</strong></td><td>{trainer.pendingCount}</td><td>{trainer.reviewedCount}</td><td>{trainer.deliveredCount}</td><td>{trainer.lastActivity ? formatDate(trainer.lastActivity, true) : "—"}</td></tr>)}</tbody></table></div>}
+      </section>
+    </>
   );
 }
 

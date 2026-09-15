@@ -3,7 +3,7 @@ import { api, participantApi } from "../lib/api";
 import type { AnswerPayload, ParticipantDraft, PublicSession } from "../lib/model";
 import { Brand, Icon, Notice, Spinner } from "../components/Brand";
 
-const DRAFT_KEY = "milliminds-reperes-draft-v1";
+const DRAFT_KEY = "milliminds-pcm-draft-v124";
 
 type ConfigResponse = { session: PublicSession; disclaimer: string };
 type SavedDraft = ParticipantDraft & { answers: Record<string, number>; currentIndex: number };
@@ -87,6 +87,7 @@ function Registration({ config, onStarted }: { config: ConfigResponse; onStarted
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [organization, setOrganization] = useState("");
+  const [trainerEmail, setTrainerEmail] = useState(() => new URLSearchParams(window.location.search).get("formateur")?.trim().toLowerCase() ?? "");
   const [consent, setConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -98,7 +99,7 @@ function Registration({ config, onStarted }: { config: ConfigResponse; onStarted
     try {
       const result = await api<ParticipantDraft>("/public/participants", {
         method: "POST",
-        body: JSON.stringify({ firstName, lastName, organization, consent }),
+        body: JSON.stringify({ firstName, lastName, organization, trainerEmail: trainerEmail.trim().toLowerCase(), consent }),
       });
       onStarted(result);
     } catch (reason) {
@@ -143,6 +144,11 @@ function Registration({ config, onStarted }: { config: ConfigResponse; onStarted
             <input autoComplete="family-name" required minLength={2} value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Votre nom" />
           </label>
         </div>
+        <label className="field trainer-email-field">
+          <span>E-mail de votre formateur</span>
+          <input type="email" autoComplete="off" inputMode="email" required value={trainerEmail} onChange={(e) => setTrainerEmail(e.target.value)} placeholder="formateur@exemple.com" />
+          <small>L’inventaire sera automatiquement attribué à ce formateur dans son espace personnel.</small>
+        </label>
         <label className="field">
           <span>Organisation <em>facultatif</em></span>
           <input autoComplete="organization" value={organization} onChange={(e) => setOrganization(e.target.value)} placeholder="Entreprise ou groupe" />
@@ -276,7 +282,7 @@ function Completion({ receipt }: { receipt: string }) {
       <span className="completion-icon"><Icon name="check" size={34}/></span>
       <span className="eyebrow">PASSATION TERMINÉE</span>
       <h1>Merci, vos réponses sont enregistrées.</h1>
-      <p>Le formateur va maintenant analyser votre Structure de Personnalité, la Base proposée et la Phase actuelle proposée afin de préparer la restitution. Les résultats ne sont pas affichés automatiquement afin de préserver la qualité de la restitution.</p>
+      <p>Votre inventaire a été automatiquement attribué au formateur dont vous avez renseigné l’adresse e-mail. Il pourra analyser votre Structure de Personnalité, la Base proposée et la Phase actuelle proposée afin de préparer la restitution. Les résultats ne sont pas affichés automatiquement afin de préserver la qualité de la restitution.</p>
       <div className="receipt"><small>Référence confidentielle</small><strong>{receipt}</strong></div>
       <p className="completion-note">Vous pouvez fermer cette page en toute sécurité.</p>
     </div>

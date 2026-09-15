@@ -1,6 +1,11 @@
+
+## Version 1.2.4 — affectation directe aux formateurs
+
+Chaque participant renseigne désormais l’adresse e-mail de son formateur avant la passation. Cette adresse devient la clé d’affectation de l’inventaire : un compte Netlify Identity disposant du rôle `formateur` voit automatiquement les inventaires attribués à son e-mail. Les administrateurs conservent une visibilité globale et disposent d’un onglet **Formateurs** avec les volumes d’inventaires par adresse.
+
 # Milliminds — Inventaire de personnalité PCM
 
-Version 1.2.3. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle structure les résultats autour de la Structure de Personnalité, de la Base, de la Phase actuelle, des Perceptions, des Canaux de Communication et des Besoins Psychologiques.
+Version 1.2.4. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle structure les résultats autour de la Structure de Personnalité, de la Base, de la Phase actuelle, des Perceptions, des Canaux de Communication et des Besoins Psychologiques.
 
 
 ## Nouveautés v1.2.3 — rôles et tableaux de bord
@@ -129,7 +134,7 @@ Variable facultative recommandee :
 ### 4. Controle apres deploiement
 
 - ouvrir `/api/health` : la reponse doit contenir `"ok": true` ;
-- ouvrir `/admin` et verifier **Version 1.2.3** ;
+- ouvrir `/admin` et verifier **Version 1.2.4** ;
 - se connecter avec un utilisateur Netlify Identity ayant le role `admin`, `superadmin` ou `formateur` ;
 - verifier que le tableau de bord se charge sans appel a `/api/admin/login` ;
 - tester **Mot de passe oublie ?** puis l ecran de definition du nouveau mot de passe.

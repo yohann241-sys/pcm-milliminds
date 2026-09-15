@@ -38,6 +38,10 @@ const clean = (value: unknown, max = 120) =>
     .trim()
     .slice(0, max);
 
+const normalizeEmail = (value: unknown) => clean(value, 320).toLowerCase();
+
+const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
 const parseBody = async (request: Request) => {
   try {
     return (await request.json()) as Record<string, unknown>;
@@ -67,7 +71,18 @@ async function requireAdmin(): Promise<AccessContext> {
   const isAdmin = roles.has("admin") || roles.has("superadmin");
   const isTrainer = roles.has("formateur");
   if (!isAdmin && !isTrainer) throw new HttpError(403, "Compte reconnu, mais rôle admin, superadmin ou formateur absent.");
-  return { email: user.email.trim().toLowerCase(), roles: [...roles], isAdmin, isTrainer };
+  const access = { email: user.email.trim().toLowerCase(), roles: [...roles], isAdmin, isTrainer };
+  await db.sql`
+    INSERT INTO trainer_directory (email, source, is_trainer, roles, last_seen_at, updated_at)
+    VALUES (${access.email}, 'identity', ${isTrainer}, ${JSON.stringify(access.roles)}::jsonb, NOW(), NOW())
+    ON CONFLICT (email) DO UPDATE SET
+      source = 'identity',
+      is_trainer = EXCLUDED.is_trainer OR trainer_directory.is_trainer,
+      roles = EXCLUDED.roles,
+      last_seen_at = NOW(),
+      updated_at = NOW()
+  `;
+  return access;
 }
 
 function requireGlobalAdmin(access: AccessContext) {
@@ -81,7 +96,7 @@ async function assertAssessmentAccess(assessmentId: string, access: AccessContex
         SELECT a.id
         FROM assessments a
         JOIN seminar_sessions s ON s.id = a.seminar_session_id
-        WHERE a.id = ${assessmentId} AND LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+        WHERE a.id = ${assessmentId} AND LOWER(COALESCE(a.trainer_email, s.owner_email, '')) = ${access.email}
       `;
   if (!rows[0]) throw new HttpError(404, "Résultat introuvable ou non attribué à votre compte formateur.");
 }
@@ -219,8 +234,12 @@ async function createParticipant(request: Request) {
   const firstName = clean(body.firstName, 80);
   const lastName = clean(body.lastName, 80);
   const organization = clean(body.organization, 120);
+  const trainerEmail = normalizeEmail(body.trainerEmail);
   if (firstName.length < 2 || lastName.length < 2) {
     throw new HttpError(400, "Le nom et le prénom sont obligatoires.");
+  }
+  if (!trainerEmail || !isValidEmail(trainerEmail)) {
+    throw new HttpError(400, "Saisissez une adresse e-mail valide pour votre formateur.");
   }
   if (body.consent !== true) throw new HttpError(400, "Le consentement est nécessaire pour commencer.");
   const session = await activePublicSession();
@@ -235,14 +254,20 @@ async function createParticipant(request: Request) {
     );
     const assessmentResult = await client.query(
       `INSERT INTO assessments (
-         participant_id, seminar_session_id, assessment_version_id, access_token_hash
-       ) VALUES ($1, $2, $3, $4)
+         participant_id, seminar_session_id, assessment_version_id, access_token_hash, trainer_email
+       ) VALUES ($1, $2, $3, $4, $5)
        RETURNING id, started_at`,
-      [participantResult.rows[0].id, session.id, session.version_id, hashToken(token)],
+      [participantResult.rows[0].id, session.id, session.version_id, hashToken(token), trainerEmail],
+    );
+    await client.query(
+      `INSERT INTO trainer_directory (email, source, updated_at)
+       VALUES ($1, 'participant', NOW())
+       ON CONFLICT (email) DO UPDATE SET updated_at = NOW()`,
+      [trainerEmail],
     );
     await client.query("COMMIT");
     const questions = await questionsForVersion(String(session.version_id));
-    await audit(`${firstName} ${lastName.toUpperCase()}`, "assessment_started", "assessment", assessmentResult.rows[0].id);
+    await audit(`${firstName} ${lastName.toUpperCase()}`, "assessment_started", "assessment", assessmentResult.rows[0].id, { trainerEmail });
     return json(
       {
         participantId: participantResult.rows[0].id,
@@ -250,6 +275,7 @@ async function createParticipant(request: Request) {
         accessToken: token,
         firstName,
         lastName: lastName.toUpperCase(),
+        trainerEmail,
         sessionName: String(session.name),
         questions,
         startedAt: assessmentResult.rows[0].started_at,
@@ -339,12 +365,13 @@ async function dashboard(request: Request) {
           ROUND(AVG(a.quality_score), 1) AS avg_quality
         FROM assessments a
         JOIN seminar_sessions s ON s.id = a.seminar_session_id
-        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+        WHERE LOWER(COALESCE(a.trainer_email, s.owner_email, '')) = ${access.email}
       `;
 
   const recentRows = access.isAdmin
     ? await db.sql<Record<string, unknown>>`
         SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
+               COALESCE(a.trainer_email, s.owner_email) AS trainer_email,
                a.status, a.submitted_at, a.quality_score, a.score_json
         FROM assessments a
         JOIN participants p ON p.id = a.participant_id
@@ -354,11 +381,12 @@ async function dashboard(request: Request) {
       `
     : await db.sql<Record<string, unknown>>`
         SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
+               COALESCE(a.trainer_email, s.owner_email) AS trainer_email,
                a.status, a.submitted_at, a.quality_score, a.score_json
         FROM assessments a
         JOIN participants p ON p.id = a.participant_id
         JOIN seminar_sessions s ON s.id = a.seminar_session_id
-        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+        WHERE LOWER(COALESCE(a.trainer_email, s.owner_email, '')) = ${access.email}
         ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
         LIMIT 8
       `;
@@ -389,6 +417,33 @@ async function dashboard(request: Request) {
         ORDER BY s.created_at DESC
       `;
 
+  const trainerRows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`
+        WITH trainer_emails AS (
+          SELECT LOWER(email) AS email FROM trainer_directory WHERE is_trainer = TRUE
+          UNION
+          SELECT LOWER(trainer_email) AS email FROM assessments WHERE trainer_email IS NOT NULL AND BTRIM(trainer_email) <> ''
+          UNION
+          SELECT LOWER(owner_email) AS email FROM seminar_sessions WHERE owner_email IS NOT NULL AND BTRIM(owner_email) <> ''
+        )
+        SELECT te.email,
+               COALESCE(td.display_name, '') AS display_name,
+               COALESCE(td.source, 'assignment') AS source,
+               COALESCE(td.is_trainer, FALSE) AS is_trainer,
+               COALESCE(td.roles, '[]'::jsonb) AS roles,
+               COUNT(a.id)::int AS inventory_count,
+               COUNT(a.id) FILTER (WHERE a.status = 'submitted')::int AS pending_count,
+               COUNT(a.id) FILTER (WHERE a.status = 'reviewed')::int AS reviewed_count,
+               COUNT(a.id) FILTER (WHERE a.status = 'delivered')::int AS delivered_count,
+               MAX(COALESCE(a.submitted_at, a.created_at)) AS last_activity
+        FROM trainer_emails te
+        LEFT JOIN trainer_directory td ON LOWER(td.email) = te.email
+        LEFT JOIN assessments a ON LOWER(COALESCE(a.trainer_email, '')) = te.email
+        GROUP BY te.email, td.display_name, td.source, td.is_trainer, td.roles
+        ORDER BY COUNT(a.id) DESC, te.email ASC
+      `
+    : [];
+
   const summary = summaryRows[0] ?? {};
   return json({
     viewer: {
@@ -417,6 +472,18 @@ async function dashboard(request: Request) {
       createdAt: String(row.created_at),
       ownerEmail: row.owner_email ? String(row.owner_email) : null,
     })),
+    trainers: trainerRows.map((row) => ({
+      email: String(row.email),
+      displayName: row.display_name ? String(row.display_name) : null,
+      source: String(row.source),
+      isTrainer: Boolean(row.is_trainer),
+      roles: Array.isArray(row.roles) ? row.roles.map(String) : [],
+      inventoryCount: Number(row.inventory_count ?? 0),
+      pendingCount: Number(row.pending_count ?? 0),
+      reviewedCount: Number(row.reviewed_count ?? 0),
+      deliveredCount: Number(row.delivered_count ?? 0),
+      lastActivity: row.last_activity ? String(row.last_activity) : null,
+    })),
   });
 }
 
@@ -436,6 +503,7 @@ function mapAssessmentListRow(row: Record<string, unknown>) {
     lastName: String(row.last_name),
     organization: row.organization ? String(row.organization) : null,
     sessionName: String(row.session_name),
+    trainerEmail: row.trainer_email ? String(row.trainer_email) : null,
     status: String(row.status) as AssessmentStatus,
     submittedAt: row.submitted_at ? String(row.submitted_at) : null,
     qualityScore: row.quality_score === null ? null : Number(row.quality_score),
@@ -453,6 +521,7 @@ async function listAssessments(request: Request) {
   const rows = access.isAdmin
     ? await db.sql<Record<string, unknown>>`
         SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
+               COALESCE(a.trainer_email, s.owner_email) AS trainer_email,
                a.status, a.submitted_at, a.quality_score, a.score_json
         FROM assessments a
         JOIN participants p ON p.id = a.participant_id
@@ -465,11 +534,12 @@ async function listAssessments(request: Request) {
       `
     : await db.sql<Record<string, unknown>>`
         SELECT a.id, p.first_name, p.last_name, p.organization, s.name AS session_name,
+               COALESCE(a.trainer_email, s.owner_email) AS trainer_email,
                a.status, a.submitted_at, a.quality_score, a.score_json
         FROM assessments a
         JOIN participants p ON p.id = a.participant_id
         JOIN seminar_sessions s ON s.id = a.seminar_session_id
-        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+        WHERE LOWER(COALESCE(a.trainer_email, s.owner_email, '')) = ${access.email}
           AND (${search} = '' OR p.first_name ILIKE ${like} OR p.last_name ILIKE ${like}
                OR COALESCE(p.organization, '') ILIKE ${like})
           AND (${status} = '' OR a.status = ${status})
@@ -486,6 +556,7 @@ async function assessmentDetail(request: Request, assessmentId: string) {
     db.sql<Record<string, unknown>>`
       SELECT a.id, a.status, a.created_at, a.submitted_at, a.quality_score, a.score_json,
              p.first_name, p.last_name, p.organization, s.name AS session_name,
+             COALESCE(a.trainer_email, s.owner_email) AS trainer_email,
              COALESCE(i.synthesis, '') AS synthesis,
              COALESCE(i.observations, '') AS observations,
              COALESCE(i.action_plan, '') AS action_plan,
@@ -632,6 +703,7 @@ async function exportCsv(request: Request) {
   const rows = access.isAdmin
     ? await db.sql<Record<string, unknown>>`
         SELECT a.id, p.last_name, p.first_name, p.organization, s.name AS session_name,
+               COALESCE(a.trainer_email, s.owner_email) AS trainer_email,
                a.status, a.submitted_at, a.quality_score, a.score_json
         FROM assessments a
         JOIN participants p ON p.id = a.participant_id
@@ -640,15 +712,16 @@ async function exportCsv(request: Request) {
       `
     : await db.sql<Record<string, unknown>>`
         SELECT a.id, p.last_name, p.first_name, p.organization, s.name AS session_name,
+               COALESCE(a.trainer_email, s.owner_email) AS trainer_email,
                a.status, a.submitted_at, a.quality_score, a.score_json
         FROM assessments a
         JOIN participants p ON p.id = a.participant_id
         JOIN seminar_sessions s ON s.id = a.seminar_session_id
-        WHERE LOWER(COALESCE(s.owner_email, '')) = ${access.email}
+        WHERE LOWER(COALESCE(a.trainer_email, s.owner_email, '')) = ${access.email}
         ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
       `;
   const headers = [
-    "Référence", "Nom", "Prénom", "Organisation", "Session", "Statut", "Soumis le",
+    "Référence", "Nom", "Prénom", "Organisation", "Session", "Formateur", "Statut", "Soumis le",
     "Qualité", "Analyse", "Conviction", "Relation", "Réflexion", "Créativité", "Action",
     "Dynamique dominante",
   ];
@@ -656,7 +729,7 @@ async function exportCsv(request: Request) {
     const result = scoreObject(row.score_json);
     const byCode = Object.fromEntries((result?.dimensions ?? []).map((item) => [item.code, item.structure]));
     return [
-      row.id, row.last_name, row.first_name, row.organization, row.session_name, row.status,
+      row.id, row.last_name, row.first_name, row.organization, row.session_name, row.trainer_email, row.status,
       row.submitted_at, row.quality_score, byCode.ANA, byCode.CON, byCode.REL,
       byCode.REF, byCode.CRE, byCode.ACT, result?.leadingDynamics.join(" / ") ?? "",
     ].map(csvCell).join(";");
@@ -676,7 +749,8 @@ async function deleteAssessment(request: Request, assessmentId: string) {
   requireGlobalAdmin(access);
 
   const rows = await db.sql<Record<string, unknown>>`
-    SELECT a.id, a.participant_id, p.first_name, p.last_name, s.name AS session_name
+    SELECT a.id, a.participant_id, p.first_name, p.last_name, s.name AS session_name,
+           COALESCE(a.trainer_email, s.owner_email) AS trainer_email
     FROM assessments a
     JOIN participants p ON p.id = a.participant_id
     JOIN seminar_sessions s ON s.id = a.seminar_session_id
@@ -688,6 +762,7 @@ async function deleteAssessment(request: Request, assessmentId: string) {
   await audit(access.email, "assessment_deleted", "assessment", assessmentId, {
     participant: `${String(row.first_name)} ${String(row.last_name)}`,
     session: String(row.session_name),
+    trainerEmail: row.trainer_email ? String(row.trainer_email) : null,
   });
 
   const participantId = String(row.participant_id);
