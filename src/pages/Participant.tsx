@@ -3,7 +3,7 @@ import { api, participantApi } from "../lib/api";
 import type { AnswerPayload, ParticipantDraft, PublicSession } from "../lib/model";
 import { Brand, Icon, Notice, Spinner } from "../components/Brand";
 
-const DRAFT_KEY = "milliminds-pcm-draft-v124";
+const DRAFT_KEY = "milliminds-pcm-draft-v126";
 
 type ConfigResponse = { session: PublicSession; disclaimer: string };
 type SavedDraft = ParticipantDraft & { answers: Record<string, number>; currentIndex: number };
@@ -25,7 +25,9 @@ export default function ParticipantPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api<ConfigResponse>("/public/config")
+    const sessionId = new URLSearchParams(window.location.search).get("session")?.trim() ?? "";
+    const configPath = sessionId ? `/public/config?session=${encodeURIComponent(sessionId)}` : "/public/config";
+    api<ConfigResponse>(configPath)
       .then(setConfig)
       .catch((reason) => setError(reason.message))
       .finally(() => setLoading(false));
@@ -87,7 +89,8 @@ function Registration({ config, onStarted }: { config: ConfigResponse; onStarted
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [organization, setOrganization] = useState("");
-  const [trainerEmail, setTrainerEmail] = useState(() => new URLSearchParams(window.location.search).get("formateur")?.trim().toLowerCase() ?? "");
+  const invitedTrainerEmail = new URLSearchParams(window.location.search).get("formateur")?.trim().toLowerCase() ?? "";
+  const [trainerEmail, setTrainerEmail] = useState(() => invitedTrainerEmail);
   const [consent, setConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -99,7 +102,14 @@ function Registration({ config, onStarted }: { config: ConfigResponse; onStarted
     try {
       const result = await api<ParticipantDraft>("/public/participants", {
         method: "POST",
-        body: JSON.stringify({ firstName, lastName, organization, trainerEmail: trainerEmail.trim().toLowerCase(), consent }),
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          organization,
+          trainerEmail: trainerEmail.trim().toLowerCase(),
+          sessionId: config.session.id,
+          consent,
+        }),
       });
       onStarted(result);
     } catch (reason) {
@@ -146,8 +156,8 @@ function Registration({ config, onStarted }: { config: ConfigResponse; onStarted
         </div>
         <label className="field trainer-email-field">
           <span>E-mail de votre formateur</span>
-          <input type="email" autoComplete="off" inputMode="email" required value={trainerEmail} onChange={(e) => setTrainerEmail(e.target.value)} placeholder="formateur@exemple.com" />
-          <small>L’inventaire sera automatiquement attribué à ce formateur dans son espace personnel.</small>
+          <input type="email" autoComplete="off" inputMode="email" required readOnly={Boolean(invitedTrainerEmail)} value={trainerEmail} onChange={(e) => setTrainerEmail(e.target.value)} placeholder="formateur@exemple.com" />
+          <small>{invitedTrainerEmail ? "Cette invitation est déjà rattachée à votre formateur." : "L’inventaire sera automatiquement attribué à ce formateur dans son espace personnel."}</small>
         </label>
         <label className="field">
           <span>Organisation <em>facultatif</em></span>

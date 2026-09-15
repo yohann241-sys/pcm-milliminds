@@ -46,7 +46,7 @@ type DashboardData = {
   summary: { total: number; pending: number; reviewed: number; delivered: number; avgQuality: number };
   recent: AssessmentListItem[];
   dimensions: DimensionDefinition[];
-  sessions: Array<{ id: string; name: string; organization: string; active: boolean; version: string; participantCount: number; createdAt: string; ownerEmail: string | null }>;
+  sessions: Array<{ id: string; name: string; organization: string; active: boolean; version: string; participantCount: number; invitationCount: number; createdAt: string; ownerEmail: string | null }>;
   trainers: TrainerDirectoryItem[];
 };
 
@@ -200,7 +200,7 @@ function AdminLogin() {
             </>
           )}
           <small className="security-copy"><Icon name="shield" size={15}/> Authentification sécurisée par Netlify Identity</small>
-          <small className="build-version">Version 1.2.5</small>
+          <small className="build-version">Version 1.2.6</small>
         </form>
       </section>
     </main>
@@ -422,24 +422,100 @@ function Sessions({ sessions, onChanged }: { sessions: DashboardData["sessions"]
   const [name, setName] = useState("");
   const [organization, setOrganization] = useState("Milliminds");
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [inviteSessionId, setInviteSessionId] = useState<string | null>(null);
+  const [recipients, setRecipients] = useState("");
+  const [inviteSubject, setInviteSubject] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [sending, setSending] = useState(false);
 
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
-    setMessage("");
-    await api("/admin/sessions", { method: "POST", body: JSON.stringify({ name, organization }) });
-    setName(""); setCreating(false); setMessage("Session créée."); await onChanged();
+    setMessage(""); setError("");
+    try {
+      const result = await api<{ created: boolean; id: string }>("/admin/sessions", { method: "POST", body: JSON.stringify({ name, organization }) });
+      setName("");
+      setCreating(false);
+      setInviteSessionId(result.id);
+      setMessage("Session créée. Vous pouvez maintenant envoyer les invitations aux participants.");
+      await onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "La session n’a pas pu être créée.");
+    }
   };
+
   const activate = async (id: string) => {
-    await api(`/admin/sessions/${id}/activate`, { method: "PUT", body: "{}" });
-    setMessage("La session participant est maintenant active."); await onChanged();
+    setMessage(""); setError("");
+    try {
+      await api(`/admin/sessions/${id}/activate`, { method: "PUT", body: "{}" });
+      setMessage("La session participant est maintenant active.");
+      await onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Activation impossible.");
+    }
+  };
+
+  const openInvitations = (sessionId: string) => {
+    setInviteSessionId((current) => current === sessionId ? null : sessionId);
+    setRecipients("");
+    setInviteSubject("");
+    setInviteMessage("");
+    setMessage("");
+    setError("");
+  };
+
+  const sendInvitations = async (event: React.FormEvent, sessionId: string) => {
+    event.preventDefault();
+    setMessage(""); setError(""); setSending(true);
+    try {
+      const result = await api<{ sent: number; inviteUrl: string }>(`/admin/sessions/${sessionId}/invitations`, {
+        method: "POST",
+        body: JSON.stringify({ recipients, subject: inviteSubject, message: inviteMessage }),
+      });
+      setRecipients("");
+      setInviteSubject("");
+      setInviteMessage("");
+      setMessage(`${result.sent} invitation${result.sent > 1 ? "s" : ""} envoyée${result.sent > 1 ? "s" : ""}. Les participants recevront un lien directement rattaché à cette session et à votre compte formateur.`);
+      await onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "L’envoi des invitations a échoué.");
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">ORGANISATION</span><h1>Sessions de séminaire</h1><p>Une seule session est ouverte aux participants à la fois.</p></div><button className="button button--primary" onClick={() => setCreating(!creating)}><Icon name="plus"/> Nouvelle session</button></div>
+      <div className="page-heading"><div><span className="eyebrow">ORGANISATION</span><h1>Sessions de séminaire</h1><p>Créez une session puis invitez directement les participants par e-mail. Chaque invitation contient un lien individuel rattaché à votre adresse de formateur.</p></div><button className="button button--primary" onClick={() => setCreating(!creating)}><Icon name="plus"/> Nouvelle session</button></div>
       {message && <Notice type="success">{message}</Notice>}
-      {creating && <form className="panel session-form" onSubmit={create}><div><h2>Créer une session</h2><p>Elle sera créée en attente. Vous pourrez ensuite l’activer.</p></div><label className="field"><span>Nom du séminaire</span><input required minLength={3} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. Séminaire Leadership — Octobre 2026"/></label><label className="field"><span>Organisation</span><input required value={organization} onChange={(e) => setOrganization(e.target.value)}/></label><div className="form-actions"><button type="button" className="button button--ghost" onClick={() => setCreating(false)}>Annuler</button><button className="button button--primary">Créer</button></div></form>}
-      <div className="session-list">{sessions.map((session) => <article className={`panel session-item ${session.active ? "is-active" : ""}`} key={session.id}><div className="session-state">{session.active ? <><span className="live-dot"/> Active</> : "En attente"}</div><div className="session-main"><small>VERSION {session.version}</small><h2>{session.name}</h2><p>{session.organization} · créée le {formatDate(session.createdAt)}</p>{session.ownerEmail && <span className="session-owner">Formateur responsable : {session.ownerEmail}</span>}</div><div className="session-count"><strong>{session.participantCount}</strong><small>participant{session.participantCount > 1 ? "s" : ""}</small></div>{!session.active && <button className="button button--soft" onClick={() => activate(session.id)}>Activer</button>}</article>)}</div>
+      {error && <Notice type="error">{error}</Notice>}
+      {creating && <form className="panel session-form" onSubmit={create}><div><h2>Créer une session</h2><p>Après création, le panneau d’invitation s’ouvrira automatiquement.</p></div><label className="field"><span>Nom du séminaire</span><input required minLength={3} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. Séminaire Leadership — Octobre 2026"/></label><label className="field"><span>Organisation</span><input required value={organization} onChange={(e) => setOrganization(e.target.value)}/></label><div className="form-actions"><button type="button" className="button button--ghost" onClick={() => setCreating(false)}>Annuler</button><button className="button button--primary">Créer</button></div></form>}
+      <div className="session-list">
+        {sessions.map((session) => (
+          <article className={`panel session-item ${session.active ? "is-active" : ""} ${inviteSessionId === session.id ? "has-invite-panel" : ""}`} key={session.id}>
+            <div className="session-state">{session.active ? <><span className="live-dot"/> Active</> : "En attente"}</div>
+            <div className="session-main"><small>VERSION {session.version}</small><h2>{session.name}</h2><p>{session.organization} · créée le {formatDate(session.createdAt)}</p>{session.ownerEmail && <span className="session-owner">Formateur responsable : {session.ownerEmail}</span>}<span className="session-invite-count">{session.invitationCount} invitation{session.invitationCount > 1 ? "s" : ""} envoyée{session.invitationCount > 1 ? "s" : ""}</span></div>
+            <div className="session-count"><strong>{session.participantCount}</strong><small>participant{session.participantCount > 1 ? "s" : ""}</small></div>
+            <div className="session-actions">
+              <button className="button button--soft" onClick={() => openInvitations(session.id)}><Icon name="mail"/> {inviteSessionId === session.id ? "Fermer" : "Inviter"}</button>
+              {!session.active && <button className="button button--soft" onClick={() => activate(session.id)}>Activer</button>}
+            </div>
+            {inviteSessionId === session.id && (
+              <form className="session-invite-panel" onSubmit={(event) => sendInvitations(event, session.id)}>
+                <div className="session-invite-head"><div><span className="panel-icon"><Icon name="mail"/></span><div><h3>Envoyer les invitations</h3><p>Ajoutez les participants. Chaque adresse recevra un e-mail séparé avec le lien vers cette session.</p></div></div><small>Jusqu’à 100 destinataires par envoi</small></div>
+                <label className="field"><span>Destinataires</span><textarea rows={6} required value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder={"alice@example.com\nJean Dupont <jean.dupont@example.com>\nmarie@example.com"}/><small>Une adresse par ligne, ou au format « Nom Prénom &lt;email@exemple.com&gt; ». Les doublons sont ignorés.</small></label>
+                <div className="field-grid">
+                  <label className="field"><span>Objet <em>facultatif</em></span><input value={inviteSubject} onChange={(e) => setInviteSubject(e.target.value)} placeholder={`Invitation à votre inventaire PCM — ${session.name}`}/></label>
+                  <label className="field"><span>Formateur attribué</span><input value={session.ownerEmail ?? ""} readOnly/></label>
+                </div>
+                <label className="field"><span>Message personnalisé <em>facultatif</em></span><textarea rows={3} value={inviteMessage} onChange={(e) => setInviteMessage(e.target.value)} placeholder="Ex. Merci de compléter l’inventaire avant notre séance de restitution."/></label>
+                <div className="invite-help"><Icon name="shield" size={17}/><span>L’adresse du formateur et l’identifiant de la session sont intégrés automatiquement au lien. Le participant n’a rien à recopier.</span></div>
+                <div className="form-actions"><button type="button" className="button button--ghost" onClick={() => setInviteSessionId(null)}>Annuler</button><button className="button button--primary" disabled={sending}>{sending ? "Envoi…" : <><Icon name="mail"/> Envoyer les invitations</>}</button></div>
+              </form>
+            )}
+          </article>
+        ))}
+      </div>
     </>
   );
 }

@@ -42,6 +42,36 @@ const normalizeEmail = (value: unknown) => clean(value, 320).toLowerCase();
 
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
+const escapeHtml = (value: unknown) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const publicOrigin = (request: Request) =>
+  (process.env.APP_ORIGIN || new URL(request.url).origin).replace(/\/$/, "");
+
+type InvitationRecipient = { email: string; name?: string };
+
+function parseInvitationRecipients(value: unknown): InvitationRecipient[] {
+  const raw = Array.isArray(value) ? value.map(String) : String(value ?? "").split(/[\n,;]+/);
+  const seen = new Set<string>();
+  const recipients: InvitationRecipient[] = [];
+  for (const entry of raw) {
+    const trimmed = String(entry).trim();
+    if (!trimmed) continue;
+    const match = trimmed.match(/^(.+?)\s*<([^<>]+)>$/);
+    const email = normalizeEmail(match ? match[2] : trimmed);
+    const name = match ? clean(match[1].replace(/^['"]|['"]$/g, ""), 120) : "";
+    if (!isValidEmail(email) || seen.has(email)) continue;
+    seen.add(email);
+    recipients.push({ email, ...(name ? { name } : {}) });
+  }
+  return recipients;
+}
+
 const parseBody = async (request: Request) => {
   try {
     return (await request.json()) as Record<string, unknown>;
@@ -142,21 +172,42 @@ function mapDimension(row: Record<string, unknown>): DimensionDefinition {
   };
 }
 
-async function activePublicSession() {
-  const rows = await db.sql<Record<string, unknown>>`
-    SELECT s.id, s.name, s.organization, av.id AS version_id, av.version,
-           av.estimated_minutes, av.disclaimer,
-           COUNT(q.id)::int AS item_count
-    FROM seminar_sessions s
-    JOIN assessment_versions av ON av.id = s.assessment_version_id
-    LEFT JOIN questionnaire_items q ON q.assessment_version_id = av.id AND q.active = TRUE
-    WHERE s.active = TRUE AND av.active = TRUE
-    GROUP BY s.id, s.name, s.organization, av.id, av.version, av.estimated_minutes, av.disclaimer
-    ORDER BY s.created_at DESC
-    LIMIT 1
-  `;
-  if (!rows[0]) throw new HttpError(503, "Aucune session de passation n’est actuellement ouverte.");
+async function sessionForPublic(sessionId?: string | null) {
+  const requestedId = sessionId && /^[0-9a-f-]{36}$/i.test(sessionId) ? sessionId : null;
+  const rows = requestedId
+    ? await db.sql<Record<string, unknown>>`
+        SELECT s.id, s.name, s.organization, av.id AS version_id, av.version,
+               av.estimated_minutes, av.disclaimer,
+               COUNT(q.id)::int AS item_count
+        FROM seminar_sessions s
+        JOIN assessment_versions av ON av.id = s.assessment_version_id
+        LEFT JOIN questionnaire_items q ON q.assessment_version_id = av.id AND q.active = TRUE
+        WHERE s.id = ${requestedId}
+        GROUP BY s.id, s.name, s.organization, av.id, av.version, av.estimated_minutes, av.disclaimer
+        LIMIT 1
+      `
+    : await db.sql<Record<string, unknown>>`
+        SELECT s.id, s.name, s.organization, av.id AS version_id, av.version,
+               av.estimated_minutes, av.disclaimer,
+               COUNT(q.id)::int AS item_count
+        FROM seminar_sessions s
+        JOIN assessment_versions av ON av.id = s.assessment_version_id
+        LEFT JOIN questionnaire_items q ON q.assessment_version_id = av.id AND q.active = TRUE
+        WHERE s.active = TRUE AND av.active = TRUE
+        GROUP BY s.id, s.name, s.organization, av.id, av.version, av.estimated_minutes, av.disclaimer
+        ORDER BY s.created_at DESC
+        LIMIT 1
+      `;
+  if (!rows[0]) {
+    throw new HttpError(503, requestedId
+      ? "Cette session d’invitation n’est plus disponible."
+      : "Aucune session de passation n’est actuellement ouverte.");
+  }
   return rows[0];
+}
+
+async function activePublicSession() {
+  return sessionForPublic(null);
 }
 
 async function questionsForVersion(versionId: string) {
@@ -213,8 +264,9 @@ async function audit(actor: string, action: string, entityType: string, entityId
   `;
 }
 
-async function publicConfig() {
-  const session = await activePublicSession();
+async function publicConfig(request: Request) {
+  const sessionId = new URL(request.url).searchParams.get("session");
+  const session = await sessionForPublic(sessionId);
   return json({
     session: {
       id: String(session.id),
@@ -242,7 +294,8 @@ async function createParticipant(request: Request) {
     throw new HttpError(400, "Saisissez une adresse e-mail valide pour votre formateur.");
   }
   if (body.consent !== true) throw new HttpError(400, "Le consentement est nécessaire pour commencer.");
-  const session = await activePublicSession();
+  const requestedSessionId = clean(body.sessionId, 40);
+  const session = await sessionForPublic(requestedSessionId || null);
   const token = createParticipantToken();
   const client = await db.pool.connect();
   try {
@@ -399,7 +452,8 @@ async function dashboard(request: Request) {
   const sessionRows = access.isAdmin
     ? await db.sql<Record<string, unknown>>`
         SELECT s.id, s.name, s.organization, s.active, s.created_at, s.owner_email, av.version,
-               COUNT(a.id)::int AS participant_count
+               COUNT(a.id)::int AS participant_count,
+               (SELECT COUNT(*)::int FROM session_invitations si WHERE si.seminar_session_id = s.id) AS invitation_count
         FROM seminar_sessions s
         JOIN assessment_versions av ON av.id = s.assessment_version_id
         LEFT JOIN assessments a ON a.seminar_session_id = s.id
@@ -408,7 +462,8 @@ async function dashboard(request: Request) {
       `
     : await db.sql<Record<string, unknown>>`
         SELECT s.id, s.name, s.organization, s.active, s.created_at, s.owner_email, av.version,
-               COUNT(a.id)::int AS participant_count
+               COUNT(a.id)::int AS participant_count,
+               (SELECT COUNT(*)::int FROM session_invitations si WHERE si.seminar_session_id = s.id) AS invitation_count
         FROM seminar_sessions s
         JOIN assessment_versions av ON av.id = s.assessment_version_id
         LEFT JOIN assessments a ON a.seminar_session_id = s.id
@@ -469,6 +524,7 @@ async function dashboard(request: Request) {
       active: Boolean(row.active),
       version: String(row.version),
       participantCount: Number(row.participant_count),
+      invitationCount: Number(row.invitation_count ?? 0),
       createdAt: String(row.created_at),
       ownerEmail: row.owner_email ? String(row.owner_email) : null,
     })),
@@ -696,6 +752,104 @@ async function activateSession(request: Request, sessionId: string) {
   return json({ activated: true });
 }
 
+async function sendSessionInvitations(request: Request, sessionId: string) {
+  assertMutationOrigin(request);
+  const access = await requireAdmin();
+  const sessionRows = access.isAdmin
+    ? await db.sql<Record<string, unknown>>`
+        SELECT id, name, organization, owner_email
+        FROM seminar_sessions WHERE id = ${sessionId}
+      `
+    : await db.sql<Record<string, unknown>>`
+        SELECT id, name, organization, owner_email
+        FROM seminar_sessions
+        WHERE id = ${sessionId} AND LOWER(COALESCE(owner_email, '')) = ${access.email}
+      `;
+  const session = sessionRows[0];
+  if (!session) throw new HttpError(404, "Session introuvable ou non attribuée à votre compte formateur.");
+
+  const body = await parseBody(request);
+  const recipients = parseInvitationRecipients(body.recipients);
+  if (!recipients.length) throw new HttpError(400, "Ajoutez au moins une adresse e-mail valide.");
+  if (recipients.length > 100) throw new HttpError(400, "Vous pouvez envoyer au maximum 100 invitations par envoi.");
+
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  const fromEmail = process.env.INVITATION_FROM_EMAIL?.trim();
+  const fromName = (process.env.INVITATION_FROM_NAME || "Milliminds Formation").trim();
+  if (!resendApiKey || !fromEmail || !isValidEmail(fromEmail)) {
+    throw new HttpError(503, "L’envoi d’e-mails n’est pas encore configuré. Ajoutez RESEND_API_KEY et INVITATION_FROM_EMAIL dans les variables d’environnement Netlify.");
+  }
+
+  const trainerEmail = normalizeEmail(session.owner_email || access.email) || access.email;
+  const subject = clean(body.subject, 180) || `Invitation à votre inventaire PCM — ${String(session.name)}`;
+  const customMessage = clean(body.message, 1200) || "Vous êtes invité(e) à compléter votre inventaire de personnalité avant la séance de restitution.";
+  const inviteUrl = `${publicOrigin(request)}/?session=${encodeURIComponent(sessionId)}&formateur=${encodeURIComponent(trainerEmail)}`;
+  const sessionName = String(session.name);
+  const organization = String(session.organization || "Milliminds");
+
+  const emails = recipients.map((recipient) => {
+    const greeting = recipient.name ? `Bonjour ${escapeHtml(recipient.name)},` : "Bonjour,";
+    return {
+      from: `${fromName} <${fromEmail}>`,
+      to: [recipient.email],
+      reply_to: trainerEmail,
+      subject,
+      html: `<!doctype html><html><body style="margin:0;background:#f3f6fb;font-family:Arial,sans-serif;color:#10264b"><div style="max-width:620px;margin:0 auto;padding:32px 18px"><div style="background:#fff;border-radius:18px;padding:30px;border:1px solid #e2e8f0"><div style="font-size:12px;font-weight:800;letter-spacing:.12em;color:#3263d6;margin-bottom:14px">MILLIMINDS · INVENTAIRE PCM</div><h1 style="font-size:26px;line-height:1.2;margin:0 0 18px">Invitation à compléter votre inventaire</h1><p style="font-size:16px;line-height:1.65">${greeting}</p><p style="font-size:16px;line-height:1.65">${escapeHtml(customMessage)}</p><div style="background:#f6f8fc;border-radius:12px;padding:16px;margin:22px 0"><strong>${escapeHtml(sessionName)}</strong><br><span style="color:#64748b">${escapeHtml(organization)}</span></div><p style="text-align:center;margin:28px 0"><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#3263d6;color:#fff;text-decoration:none;padding:14px 24px;border-radius:10px;font-weight:800">Commencer l’inventaire</a></p><p style="font-size:13px;line-height:1.55;color:#64748b">Votre inventaire sera automatiquement attribué à votre formateur : <strong>${escapeHtml(trainerEmail)}</strong>.</p><p style="font-size:12px;line-height:1.5;color:#94a3b8">Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>${escapeHtml(inviteUrl)}</p></div></div></body></html>`,
+      text: `${recipient.name ? `Bonjour ${recipient.name},` : "Bonjour,"}\n\n${customMessage}\n\nSession : ${sessionName}\nOrganisation : ${organization}\n\nCommencer l’inventaire : ${inviteUrl}\n\nFormateur : ${trainerEmail}`,
+      tags: [
+        { name: "category", value: "pcm_invitation" },
+        { name: "session", value: sessionId.replace(/-/g, "").slice(0, 32) },
+      ],
+    };
+  });
+
+  const idempotencyKey = `pcm-invite/${sessionId}/${Date.now()}`;
+  const response = await fetch("https://api.resend.com/emails/batch", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${resendApiKey}`,
+      "idempotency-key": idempotencyKey,
+    },
+    body: JSON.stringify(emails),
+  });
+  const payload = await response.json().catch(() => ({})) as { data?: Array<{ id?: string }>; message?: string; error?: { message?: string } };
+  if (!response.ok) {
+    const providerMessage = payload?.error?.message || payload?.message || "Erreur du service d’envoi d’e-mails.";
+    await audit(access.email, "session_invitation_failed", "seminar_session", sessionId, { count: recipients.length, providerMessage });
+    throw new HttpError(502, `L’envoi des invitations a échoué : ${providerMessage}`);
+  }
+
+  const providerItems = Array.isArray(payload.data) ? payload.data : [];
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (let index = 0; index < recipients.length; index += 1) {
+      const recipient = recipients[index];
+      const providerId = providerItems[index]?.id ?? null;
+      await client.query(
+        `INSERT INTO session_invitations (
+           seminar_session_id, trainer_email, recipient_email, recipient_name,
+           subject, invite_url, provider, provider_message_id, status, sent_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,'resend',$7,'sent',NOW())`,
+        [sessionId, trainerEmail, recipient.email, recipient.name ?? null, subject, inviteUrl, providerId],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await audit(access.email, "session_invitations_sent", "seminar_session", sessionId, {
+    count: recipients.length,
+    trainerEmail,
+  });
+  return json({ sent: recipients.length, inviteUrl, trainerEmail });
+}
+
 const csvCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 
 
@@ -818,7 +972,7 @@ export default async (request: Request, _context: Context) => {
     const method = request.method.toUpperCase();
 
     if (method === "GET" && path === "/health") return json({ ok: true, service: "reperes-communication" });
-    if (method === "GET" && path === "/public/config") return publicConfig();
+    if (method === "GET" && path === "/public/config") return publicConfig(request);
     if (method === "POST" && path === "/public/participants") return createParticipant(request);
 
     const progressMatch = path.match(/^\/public\/assessments\/([0-9a-f-]{36})\/progress$/i);
@@ -838,6 +992,8 @@ export default async (request: Request, _context: Context) => {
 
     const activateMatch = path.match(/^\/admin\/sessions\/([0-9a-f-]{36})\/activate$/i);
     if (method === "PUT" && activateMatch) return activateSession(request, activateMatch[1]);
+    const invitationsMatch = path.match(/^\/admin\/sessions\/([0-9a-f-]{36})\/invitations$/i);
+    if (method === "POST" && invitationsMatch) return sendSessionInvitations(request, invitationsMatch[1]);
     const detailMatch = path.match(/^\/admin\/assessments\/([0-9a-f-]{36})$/i);
     if (method === "GET" && detailMatch) return assessmentDetail(request, detailMatch[1]);
     if (method === "DELETE" && detailMatch) return deleteAssessment(request, detailMatch[1]);

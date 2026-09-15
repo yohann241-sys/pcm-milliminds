@@ -1,11 +1,11 @@
 
-## Version 1.2.4 — affectation directe aux formateurs
+## Version 1.2.6 — invitations e-mail depuis l’espace formateur
 
 Chaque participant renseigne désormais l’adresse e-mail de son formateur avant la passation. Cette adresse devient la clé d’affectation de l’inventaire : un compte Netlify Identity disposant du rôle `formateur` voit automatiquement les inventaires attribués à son e-mail. Les administrateurs conservent une visibilité globale et disposent d’un onglet **Formateurs** avec les volumes d’inventaires par adresse.
 
 # Milliminds — Inventaire de personnalité PCM
 
-Version 1.2.4. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle structure les résultats autour de la Structure de Personnalité, de la Base, de la Phase actuelle, des Perceptions, des Canaux de Communication et des Besoins Psychologiques.
+Version 1.2.6. Application professionnelle de passation, d’analyse et de restitution destinée aux formateurs certifiés. Elle permet désormais de créer une session puis d’envoyer directement les invitations aux participants depuis l’espace formateur. Chaque invitation ouvre la bonne session et préremplit l’adresse du formateur pour garantir l’attribution automatique de l’inventaire.
 
 
 ## Nouveautés v1.2.3 — rôles et tableaux de bord
@@ -131,10 +131,33 @@ Variable facultative recommandee :
 | --- | --- |
 | `APP_ORIGIN` | URL exacte du site, sans barre finale, ex. `https://pcmprocess.netlify.app` |
 
-### 4. Controle apres deploiement
+
+### 4. Configurer l’envoi des invitations par e-mail
+
+L’envoi est réalisé côté serveur via **Resend**. Dans Netlify, ouvrir **Project configuration > Environment variables** et ajouter :
+
+| Variable | Valeur attendue |
+| --- | --- |
+| `RESEND_API_KEY` | clé API Resend, ex. `re_...` |
+| `INVITATION_FROM_EMAIL` | adresse d’expédition appartenant à un domaine vérifié dans Resend |
+| `INVITATION_FROM_NAME` | nom affiché, ex. `Milliminds Formation` (facultatif) |
+| `APP_ORIGIN` | URL publique exacte du site, ex. `https://pcmprocess.netlify.app` |
+
+Après ajout ou modification des variables, relancer un déploiement Netlify.
+
+Dans l’espace **Formateur > Mes séminaires** :
+1. créer la session ;
+2. le panneau **Envoyer les invitations** s’ouvre automatiquement ;
+3. saisir une adresse par ligne, ou `Nom Prénom <email@exemple.com>` ;
+4. personnaliser éventuellement l’objet et le message ;
+5. cliquer sur **Envoyer les invitations**.
+
+Le participant reçoit un lien contenant l’identifiant de la session et l’e-mail du formateur. L’adresse du formateur est préremplie et verrouillée pendant l’identification du participant.
+
+### 5. Controle apres deploiement
 
 - ouvrir `/api/health` : la reponse doit contenir `"ok": true` ;
-- ouvrir `/admin` et verifier **Version 1.2.4** ;
+- ouvrir `/admin` et verifier **Version 1.2.6** ;
 - se connecter avec un utilisateur Netlify Identity ayant le role `admin`, `superadmin` ou `formateur` ;
 - verifier que le tableau de bord se charge sans appel a `/api/admin/login` ;
 - tester **Mot de passe oublie ?** puis l ecran de definition du nouveau mot de passe.
