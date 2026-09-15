@@ -698,6 +698,34 @@ async function activateSession(request: Request, sessionId: string) {
 
 const csvCell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 
+
+async function registerTrainer(request: Request) {
+  assertMutationOrigin(request);
+  const access = await requireAdmin();
+  requireGlobalAdmin(access);
+  const body = await parseBody(request);
+  const email = clean(body.email, 320).toLowerCase();
+  const displayName = clean(body.displayName, 120);
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    throw new HttpError(400, "Saisissez une adresse e-mail de formateur valide.");
+  }
+  await db.sql`
+    INSERT INTO trainer_directory (email, display_name, source, is_trainer, roles, updated_at)
+    VALUES (${email}, ${displayName || null}, 'admin', TRUE, ${JSON.stringify(["formateur"])}::jsonb, NOW())
+    ON CONFLICT (email) DO UPDATE SET
+      display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), trainer_directory.display_name),
+      source = 'admin',
+      is_trainer = TRUE,
+      roles = CASE
+        WHEN trainer_directory.roles ? 'formateur' THEN trainer_directory.roles
+        ELSE trainer_directory.roles || '["formateur"]'::jsonb
+      END,
+      updated_at = NOW()
+  `;
+  await audit(access.email, "trainer_registered", "trainer", email, { displayName: displayName || null });
+  return json({ registered: true, email, displayName: displayName || null }, 201);
+}
+
 async function exportCsv(request: Request) {
   const access = await requireAdmin();
   const rows = access.isAdmin
@@ -805,6 +833,7 @@ export default async (request: Request, _context: Context) => {
     if (method === "GET" && path === "/admin/dashboard") return dashboard(request);
     if (method === "GET" && path === "/admin/assessments") return listAssessments(request);
     if (method === "GET" && path === "/admin/export") return exportCsv(request);
+    if (method === "POST" && path === "/admin/trainers") return registerTrainer(request);
     if (method === "POST" && path === "/admin/sessions") return createSession(request);
 
     const activateMatch = path.match(/^\/admin\/sessions\/([0-9a-f-]{36})\/activate$/i);

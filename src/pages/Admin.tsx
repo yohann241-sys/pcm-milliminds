@@ -200,7 +200,7 @@ function AdminLogin() {
             </>
           )}
           <small className="security-copy"><Icon name="shield" size={15}/> Authentification sécurisée par Netlify Identity</small>
-          <small className="build-version">Version 1.2.4</small>
+          <small className="build-version">Version 1.2.5</small>
         </form>
       </section>
     </main>
@@ -290,7 +290,7 @@ function AdminWorkspace({ email, initialIsAdmin }: { email: string; initialIsAdm
           {error && <Notice type="error">{error}</Notice>}
           {!loading && dashboard && tab === "overview" && <Overview dashboard={dashboard} openResults={() => setTab("results")} />}
           {!loading && dashboard && tab === "results" && <ResultsList assessments={filtered} search={search} setSearch={setSearch} status={status} setStatus={setStatus} isAdmin={isAdmin} onDelete={deleteInventory} />}
-          {!loading && dashboard && isAdmin && tab === "trainers" && <TrainersDirectory trainers={dashboard.trainers} />}
+          {!loading && dashboard && isAdmin && tab === "trainers" && <TrainersDirectory trainers={dashboard.trainers} onChanged={load} />}
           {!loading && dashboard && tab === "sessions" && <Sessions sessions={dashboard.sessions} onChanged={load} />}
           {!loading && dashboard && tab === "method" && <Methodology dimensions={dashboard.dimensions} />}
         </div>
@@ -354,8 +354,32 @@ function AssessmentTable({ assessments, compact = false, isAdmin = false, onDele
   );
 }
 
-function TrainersDirectory({ trainers }: { trainers: TrainerDirectoryItem[] }) {
+function TrainersDirectory({ trainers, onChanged }: { trainers: TrainerDirectoryItem[]; onChanged: () => Promise<void> }) {
   const [query, setQuery] = useState("");
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const register = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setMessage("");
+    setError("");
+    setSaving(true);
+    try {
+      await api("/admin/trainers", { method: "POST", body: JSON.stringify({ email: email.trim().toLowerCase(), displayName: displayName.trim() }) });
+      setMessage("Formateur ajouté au répertoire de l’application.");
+      setEmail("");
+      setDisplayName("");
+      await onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Enregistrement impossible.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const filtered = trainers.filter((trainer) => {
     const haystack = `${trainer.email} ${trainer.displayName ?? ""}`.toLowerCase();
     return !query || haystack.includes(query.toLowerCase());
@@ -363,7 +387,17 @@ function TrainersDirectory({ trainers }: { trainers: TrainerDirectoryItem[] }) {
   return (
     <>
       <div className="page-heading"><div><span className="eyebrow">ADMINISTRATION</span><h1>Liste des formateurs</h1><p>Cette liste regroupe les formateurs reconnus dans l’application et les adresses e-mail auxquelles des participants ont attribué un inventaire.</p></div><div className="trainer-total"><strong>{trainers.length}</strong><span>formateur{trainers.length > 1 ? "s" : ""}</span></div></div>
-      <Notice type="info"><strong>Affectation directe.</strong> Lors de l’inscription, le participant saisit l’adresse e-mail de son formateur. L’inventaire apparaît ensuite automatiquement dans le tableau de bord personnel correspondant.</Notice>
+      <Notice type="info"><strong>Netlify Identity et annuaire applicatif.</strong> Un compte créé dans Netlify Identity ne peut pas être listé automatiquement par l’application avant sa première connexion. Utilisez le formulaire ci-dessous pour référencer immédiatement un formateur déjà créé dans Netlify.</Notice>
+      {message && <Notice type="success">{message}</Notice>}
+      {error && <Notice type="error">{error}</Notice>}
+      <section className="panel trainer-register-panel">
+        <div className="panel-heading"><div><h2>Ajouter un formateur existant</h2><p>Enregistrez ici le même e-mail que celui utilisé dans Netlify Identity.</p></div></div>
+        <form className="trainer-register-form" onSubmit={register}>
+          <label className="field"><span>Nom du formateur</span><input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Prénom Nom" /></label>
+          <label className="field"><span>Adresse e-mail Netlify Identity</span><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="formateur@exemple.com" /></label>
+          <button className="button button--primary" disabled={saving}>{saving ? "Enregistrement…" : <>Ajouter à la liste <Icon name="check"/></>}</button>
+        </form>
+      </section>
       <section className="panel">
         <div className="filters"><label className="search-field"><Icon name="search"/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un formateur…" /></label><span className="result-count">{filtered.length} résultat{filtered.length > 1 ? "s" : ""}</span></div>
         {!filtered.length ? <div className="empty-state"><Icon name="users" size={34}/><h3>Aucun formateur référencé</h3><p>Les adresses apparaîtront ici dès une affectation ou une connexion formateur.</p></div> : <div className="table-wrap"><table className="data-table trainer-table"><thead><tr><th>Formateur</th><th>Statut</th><th>Inventaires</th><th>À analyser</th><th>Analysés</th><th>Restitués</th><th>Dernière activité</th></tr></thead><tbody>{filtered.map((trainer) => <tr key={trainer.email}><td><div className="trainer-cell"><span>{trainer.email.slice(0,1).toUpperCase()}</span><div><strong>{trainer.displayName || trainer.email.split("@")[0]}</strong><small>{trainer.email}</small></div></div></td><td><span className={`trainer-state ${trainer.isTrainer ? "is-confirmed" : "is-referenced"}`}>{trainer.isTrainer ? "Compte formateur reconnu" : "Référencé par affectation"}</span></td><td><strong>{trainer.inventoryCount}</strong></td><td>{trainer.pendingCount}</td><td>{trainer.reviewedCount}</td><td>{trainer.deliveredCount}</td><td>{trainer.lastActivity ? formatDate(trainer.lastActivity, true) : "—"}</td></tr>)}</tbody></table></div>}
